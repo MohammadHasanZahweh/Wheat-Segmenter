@@ -121,6 +121,7 @@ Create `.vscode/launch.json` with this config:
 }
 ```
 
+
 Ensure the interpreter is `.venv` (VS Code status bar → select interpreter) and reload the window if IntelliSense shows missing imports.
 
 ## Editing Defaults (Optional)
