@@ -84,6 +84,25 @@ What you should see:
 - `by_region=` counts per region in the sample.
 - `batch_x` shows the tensor shape for a single batch.
 
+## Baseline ML (Random Forest, SVM)
+
+Train simple pixel-level baselines on a small, stratified subset of tiles. Features are per-pixel concatenated bands across the selected months; labels come from the wheat mask.
+
+Examples (PowerShell):
+
+```powershell
+# Random Forest on ~1% of tiles
+python baseline_ml.py --root "C:\\Users\\Administrator\\Desktop\\preprocessed_data" --year 2020 --model rf --fraction 0.01 --pixels-per-tile 4096
+
+# SVM (RBF) baseline
+python baseline_ml.py --root "C:\\Users\\Administrator\\Desktop\\preprocessed_data" --year 2020 --model svm --fraction 0.01 --pixels-per-tile 4096 --svm-kernel rbf --svm-C 1.0 --svm-gamma scale
+```
+
+Flags:
+- `--regions`, `--months` to control spatiotemporal scope
+- `--balance-pixels` to sample roughly equal wheat/non-wheat pixels per tile
+- `--save-model path.joblib` to persist the trained classifier
+
 ## VS Code Debug (F5)
 
 Create `.vscode/launch.json` with this config:
