@@ -6,7 +6,7 @@ This is a concise, copy‑ready README for your local version extracted from Col
 
 - `wheat_segmenter.py`: Single‑file runner/dataset loader extracted from your Colab notebook.
 - `requirements.txt`: Python dependencies.
-- `.vscode/settings.json`: Points VS Code to the local venv (optional, already added).
+
 
 ## Prerequisites
 
