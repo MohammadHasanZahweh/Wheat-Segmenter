@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from typing import Dict, Any, List, Tuple
 from pathlib import Path
+
+# Add the project root to Python path to import wheat_segmenter
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import numpy as np
 import joblib
@@ -17,7 +23,7 @@ from shapely.geometry.base import BaseGeometry
 import rasterio
 from rasterio.warp import transform_bounds
 
-from wsegment.dataloader import WheatTilesDataset
+from wheat_segmenter import WheatTilesDataset
 
 
 @dataclass
