@@ -1,0 +1,31 @@
+version: "3.8"
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gpu
+    ports:
+      - "8501:8501"
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data
+      - ../models:/app/models
+      - ../runs:/app/runs
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=true
+      - PYTHONUNBUFFERED=1
+      - MLFLOW_TRACKING_URI=file:/app/runs/mlruns
+    restart: unless-stopped
+
+  mlflow:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.cpu
+    command: mlflow ui --backend-store-uri file:/app/runs/mlruns --host 0.0.0.0 --port 5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../runs:/app/runs
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
