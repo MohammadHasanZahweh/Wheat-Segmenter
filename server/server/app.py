@@ -55,11 +55,13 @@ def train_job(job_id: str, req: TrainRequest):
 # -------------------------------------------------------
 @app.post("/train")
 def start_train(req: TrainRequest):
+    print("Starting training")
     job_id = f"job_{int(time.time())}"
     jobs[job_id] = {"status": "running"}
 
-    t = threading.Thread(target=train_job, args=(job_id, req), daemon=True)
-    t.start()
+    train_job(job_id, req)
+    # t = threading.Thread(target=train_job, args=(job_id, req), daemon=True)
+    # t.start()
 
     return {"job_id": job_id, "status": "started"}
 

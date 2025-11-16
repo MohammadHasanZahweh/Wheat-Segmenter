@@ -9,8 +9,8 @@ from pydantic import BaseModel
 
 
 DATA_PATH   = Path(os.getenv("DATA_PATH", r"D:\image_lebanon\Lebanon\blbk_dataset\Requested_Tiffs_lcc"))
-MODELS_PATH = Path(os.getenv("RUNS_PATH", r"../runs"))
-PROCESS_DATA_PATH       = Path(r"../processed_data/")
+MODELS_PATH = Path(os.getenv("RUNS_PATH", r"./runs"))
+PROCESS_DATA_PATH       = Path(r"./processed_data/")
 PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data"
 
 
