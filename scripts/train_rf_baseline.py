@@ -1,38 +1,20 @@
-"""
-Train XGBoost baseline for wheat pixel segmentation.
-
-Design
-- Samples a stratified subset of tiles for training and a separate subset from
-  the remaining tiles for testing.
-- Extracts per-pixel features by flattening months×bands and labels from the
-  wheat mask; valid-mask filters out no-data.
-
-Usage (PowerShell)
-  python train_xgboost.py \
-    --root "C:\\Users\\Administrator\\Desktop\\preprocessed_data" \
-    --year 2020 \
-    --train-fraction 0.01 \
-    --test-fraction 0.25 \
-    --pixels-per-tile 4096 \
-    --seed 42 \
-    --n-estimators 400 --max-depth 8 --learning-rate 0.05 \
-    --save-model runs/xgb_2020.joblib
-
-Notes
-- Requires xgboost to be installed (see requirements.txt). If installation is
-  problematic on your Python version, consider the alternative in
-  train_histgb.py which uses scikit-learn only.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple, Sequence, List
+from typing import List
 
 import argparse
+import os
+import sys
+
 import numpy as np
 from torch.utils.data import Subset
+
+# Ensure project root (where wheat_segmenter.py lives) is on sys.path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from wheat_segmenter import WheatTilesDataset
 from stratified_sampler import StratifiedRandomSubset
@@ -43,19 +25,15 @@ from ml_utils import build_xy_from_tiles, f1_iou
 class Config:
     root: str
     year: str
-    regions: list[str] | None
+    regions: List[str] | None
     months: tuple[int, ...]
     train_fraction: float
     test_fraction: float
     pixels_per_tile: int
     balance_pixels: bool
     seed: int
-    # XGB params
-    n_estimators: int
-    max_depth: int
-    learning_rate: float
-    subsample: float
-    colsample_bytree: float
+    rf_estimators: int
+    rf_max_depth: int | None
     save_model: str | None
 
 
@@ -77,21 +55,19 @@ def load_dataset(cfg: Config) -> WheatTilesDataset:
 
 
 def train_and_eval(cfg: Config) -> None:
+    from sklearn.ensemble import RandomForestClassifier
     import joblib
-    from xgboost import XGBClassifier
 
     print("Loading dataset...")
     ds = load_dataset(cfg)
     print(f"Indexed tiles: {len(ds)}")
 
-    # Train sampling (~fraction of ALL tiles)
     print(f"Sampling TRAIN ~{cfg.train_fraction*100:.2f}% of tiles (stratified)...")
     train_tiles = list(iter(StratifiedRandomSubset(ds, fraction=cfg.train_fraction, n_bins=5, seed=cfg.seed)))
     print(f"Train tiles: {len(train_tiles)}")
     if len(train_tiles) == 0:
         raise RuntimeError("Train sampler returned 0 tiles. Increase --train-fraction or check data.")
 
-    # Test sampling from remaining
     all_ids = set(range(len(ds)))
     remaining = sorted(all_ids.difference(set(train_tiles)))
     if len(remaining) == 0:
@@ -108,29 +84,23 @@ def train_and_eval(cfg: Config) -> None:
     if len(y_train) == 0:
         raise RuntimeError("No training pixels extracted. Increase --pixels-per-tile or adjust data.")
 
-    clf = XGBClassifier(
-        n_estimators=cfg.n_estimators,
-        max_depth=cfg.max_depth,
-        learning_rate=cfg.learning_rate,
-        subsample=cfg.subsample,
-        colsample_bytree=cfg.colsample_bytree,
-        tree_method="hist",
-        objective="binary:logistic",
+    clf = RandomForestClassifier(
+        n_estimators=cfg.rf_estimators,
+        max_depth=cfg.rf_max_depth,
         n_jobs=-1,
         random_state=cfg.seed,
-        eval_metric="logloss",
+        class_weight=None,
     )
 
-    print("Training XGBoost...")
+    print("Training RandomForest...")
     clf.fit(X_train, y_train)
 
-    # Evaluate on test tiles
     if val_tiles:
         print("Building test pixel matrix...")
         X_val, y_val = build_xy_from_tiles(ds, val_tiles, cfg.pixels_per_tile, False, cfg.seed + 1)
         print(f"Test pixels: {len(y_val)}")
         if len(y_val) > 0:
-            y_pred = (clf.predict_proba(X_val)[:, 1] >= 0.5).astype(np.uint8)
+            y_pred = clf.predict(X_val)
             f1, iou = f1_iou(y_val, y_pred)
             pos_rate = float(y_val.mean()) if len(y_val) > 0 else 0.0
             print(f"Test: F1={f1:.4f} | IoU={iou:.4f} | PosRate={pos_rate:.3f}")
@@ -138,7 +108,7 @@ def train_and_eval(cfg: Config) -> None:
             print("Test set had 0 pixels after filtering.")
     else:
         print("No test tiles; reporting train metrics only.")
-        y_pred_tr = (clf.predict_proba(X_train)[:, 1] >= 0.5).astype(np.uint8)
+        y_pred_tr = clf.predict(X_train)
         f1, iou = f1_iou(y_train, y_pred_tr)
         pos_rate = float(y_train.mean())
         print(f"Train: F1={f1:.4f} | IoU={iou:.4f} | PosRate={pos_rate:.3f}")
@@ -151,48 +121,81 @@ def train_and_eval(cfg: Config) -> None:
 
 
 def parse_args() -> Config:
-    p = argparse.ArgumentParser(description="XGBoost baseline for wheat segmentation")
+    p = argparse.ArgumentParser(
+        description="Random Forest baseline for wheat segmentation (train/test split)"
+    )
     p.add_argument("--root", required=True, help="Preprocessed root containing data/ and label/")
     p.add_argument("--year", required=True, help="Year subfolder under data/ and label/")
     p.add_argument("--regions", nargs="*", default=None, help="Region ids (strings). If omitted, use all.")
-    p.add_argument("--months", nargs="*", type=int, default=[11,12,1,2,3,4,5,6,7], help="Months order")
-    # Fractions
-    p.add_argument("--train-fraction", type=float, default=0.01, help="Fraction of ALL tiles for training")
-    p.add_argument("--test-fraction", type=float, default=0.25, help="Fraction of REMAINING tiles for testing")
-    # Pixels
-    p.add_argument("--pixels-per-tile", type=int, default=4096, help="Max valid pixels sampled per tile")
-    p.add_argument("--balance-pixels", action="store_true", help="Class-balance pixel sampling within tiles")
+    p.add_argument(
+        "--months",
+        nargs="*",
+        type=int,
+        default=[11, 12, 1, 2, 3, 4, 5, 6, 7],
+        help="Months to include",
+    )
+    p.add_argument(
+        "--train-fraction",
+        type=float,
+        default=0.01,
+        help="Fraction of ALL tiles for training",
+    )
+    p.add_argument(
+        "--test-fraction",
+        type=float,
+        default=0.25,
+        help="Fraction of REMAINING tiles for testing",
+    )
+    p.add_argument(
+        "--pixels-per-tile",
+        type=int,
+        default=4096,
+        help="Max valid pixels sampled per tile",
+    )
+    p.add_argument(
+        "--balance-pixels",
+        action="store_true",
+        help="Class-balance pixel sampling within tiles",
+    )
     p.add_argument("--seed", type=int, default=42, help="Random seed")
-    # XGB
-    p.add_argument("--n-estimators", type=int, default=400, help="XGBoost n_estimators")
-    p.add_argument("--max-depth", type=int, default=8, help="XGBoost max_depth")
-    p.add_argument("--learning-rate", type=float, default=0.05, help="XGBoost learning_rate")
-    p.add_argument("--subsample", type=float, default=0.8, help="XGBoost subsample")
-    p.add_argument("--colsample-bytree", type=float, default=0.8, help="XGBoost colsample_bytree")
-    # Save
-    p.add_argument("--save-model", default=None, help="Optional path to save the trained model (.joblib)")
+    p.add_argument(
+        "--rf-estimators",
+        type=int,
+        default=200,
+        help="RandomForest n_estimators",
+    )
+    p.add_argument(
+        "--rf-max-depth",
+        type=int,
+        default=None,
+        help="RandomForest max_depth (None=unlimited)",
+    )
+    p.add_argument(
+        "--save-model",
+        default=None,
+        help="Optional path to save the trained model (.joblib)",
+    )
 
-    args = p.parse_args()
-
+    a = p.parse_args()
+    months = tuple(int(m) for m in a.months)
+    rf_max_depth = None if a.rf_max_depth in (None, 0) else int(a.rf_max_depth)
     return Config(
-        root=str(args.root),
-        year=str(args.year),
-        regions=[str(r) for r in args.regions] if args.regions else None,
-        months=tuple(int(m) for m in args.months),
-        train_fraction=float(args.train_fraction),
-        test_fraction=float(args.test_fraction),
-        pixels_per_tile=int(args.pixels_per_tile),
-        balance_pixels=bool(args.balance_pixels),
-        seed=int(args.seed),
-        n_estimators=int(args.n_estimators),
-        max_depth=int(args.max_depth),
-        learning_rate=float(args.learning_rate),
-        subsample=float(args.subsample),
-        colsample_bytree=float(args.colsample_bytree),
-        save_model=str(args.save_model) if args.save_model else None,
+        root=str(a.root),
+        year=str(a.year),
+        regions=[str(r) for r in a.regions] if a.regions else None,
+        months=months,
+        train_fraction=float(a.train_fraction),
+        test_fraction=float(a.test_fraction),
+        pixels_per_tile=int(a.pixels_per_tile),
+        balance_pixels=bool(a.balance_pixels),
+        seed=int(a.seed),
+        rf_estimators=int(a.rf_estimators),
+        rf_max_depth=rf_max_depth,
+        save_model=str(a.save_model) if a.save_model else None,
     )
 
 
 if __name__ == "__main__":
     cfg = parse_args()
     train_and_eval(cfg)
+

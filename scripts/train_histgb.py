@@ -1,30 +1,18 @@
-"""
-Train a scikit-learn HistGradientBoostingClassifier baseline.
-
-This is a strong tree-ensemble alternative to XGBoost that has no extra
-dependencies beyond scikit-learn and runs fast with histogram-based splits.
-
-Usage (PowerShell)
-  python train_histgb.py \
-    --root "C:\\Users\\Administrator\\Desktop\\preprocessed_data" \
-    --year 2020 \
-    --train-fraction 0.01 \
-    --test-fraction 0.25 \
-    --pixels-per-tile 4096 \
-    --seed 42 \
-    --max-depth 8 --max-iter 400 --learning-rate 0.05 \
-    --save-model runs/histgb_2020.joblib
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 import argparse
-from typing import Tuple
+import os
+import sys
 
 import numpy as np
 from torch.utils.data import Subset
+
+# Ensure project root (where wheat_segmenter.py lives) is on sys.path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from wheat_segmenter import WheatTilesDataset
 from stratified_sampler import StratifiedRandomSubset
@@ -42,7 +30,6 @@ class Config:
     pixels_per_tile: int
     balance_pixels: bool
     seed: int
-    # HistGB params
     max_depth: int | None
     max_iter: int
     learning_rate: float
@@ -114,7 +101,6 @@ def train_and_eval(cfg: Config) -> None:
         X_val, y_val = build_xy_from_tiles(ds, val_tiles, cfg.pixels_per_tile, False, cfg.seed + 1)
         print(f"Test pixels: {len(y_val)}")
         if len(y_val) > 0:
-            # predict_proba available in recent sklearn; else use decision_function
             if hasattr(clf, "predict_proba"):
                 y_pred = (clf.predict_proba(X_val)[:, 1] >= 0.5).astype(np.uint8)
             else:
@@ -147,19 +133,15 @@ def parse_args() -> Config:
     p.add_argument("--year", required=True, help="Year subfolder under data/ and label/")
     p.add_argument("--regions", nargs="*", default=None, help="Region ids (strings). If omitted, use all.")
     p.add_argument("--months", nargs="*", type=int, default=[11,12,1,2,3,4,5,6,7], help="Months order")
-    # Fractions
     p.add_argument("--train-fraction", type=float, default=0.01, help="Fraction of ALL tiles for training")
     p.add_argument("--test-fraction", type=float, default=0.25, help="Fraction of REMAINING tiles for testing")
-    # Pixels
     p.add_argument("--pixels-per-tile", type=int, default=4096, help="Max valid pixels sampled per tile")
     p.add_argument("--balance-pixels", action="store_true", help="Class-balance pixel sampling within tiles")
     p.add_argument("--seed", type=int, default=42, help="Random seed")
-    # HistGB
-    p.add_argument("--max-depth", type=int, default=8, help="Max tree depth (None for unlimited)")
+    p.add_argument("--max-depth", type=int, default=8, help="Max tree depth (None unlimited)")
     p.add_argument("--max-iter", type=int, default=400, help="Number of boosting iterations")
     p.add_argument("--learning-rate", type=float, default=0.05, help="Learning rate")
     p.add_argument("--l2-regularization", type=float, default=0.0, help="L2 regularization strength")
-    # Save
     p.add_argument("--save-model", default=None, help="Optional path to save the trained model (.joblib)")
 
     a = p.parse_args()
