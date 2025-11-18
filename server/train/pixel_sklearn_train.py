@@ -2,24 +2,12 @@
 import joblib
 from pathlib import Path
 from typing import Dict, Any
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.linear_model import LogisticRegression
 import numpy as np
 
 from server.config import ModelType, SklearnType, ModelRun, PIXEL_SPLIT_DATA_PATH, TrainRequest, MODELS_PATH
 from dataset.PixelDataset import PixelRangeNPYDataset, PixelFromKNPYDataset
 
-
-# -------------------------------------------------------
-# Build sklearn sub-model
-# -------------------------------------------------------
-def build_sklearn_model(sub: SklearnType):
-    if sub == SklearnType.KNN:
-        return KNeighborsClassifier(n_neighbors=3)
-    if sub == SklearnType.LR:
-        return LogisticRegression(max_iter=500)
-
-    raise NotImplementedError(f"Sub-model type {sub} is not implemented.")
+from model import keras_pixel_model
 
 
 # -------------------------------------------------------
