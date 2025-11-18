@@ -25,7 +25,7 @@ def get_file_name(base_path, year, month, aoi):
 def get_files_list(base_path, year, aoi, months=[11,12,1,2,3,4,5,6,7]):
     return [get_file_name(base_path, year, month, aoi) for month in months]
 
-print(get_file_name(DATA_PATH,2020,11,0),get_file_name(DATA_PATH,2020,7,0))
+# print(get_file_name(DATA_PATH,2020,11,0),get_file_name(DATA_PATH,2020,7,0))
 
 
 
