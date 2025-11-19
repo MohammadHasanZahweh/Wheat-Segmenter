@@ -5,6 +5,7 @@ from pathlib import Path
 import argparse
 import os
 import sys
+from typing import Any
 
 import numpy as np
 from torch.utils.data import Subset
@@ -53,7 +54,7 @@ def load_dataset(cfg: Config) -> WheatTilesDataset:
     )
 
 
-def train_and_eval(cfg: Config) -> None:
+def train_and_eval(cfg: Config) -> dict[str, Any]:
     import joblib
     from sklearn.ensemble import HistGradientBoostingClassifier
 
@@ -95,35 +96,65 @@ def train_and_eval(cfg: Config) -> None:
     print("Training HistGradientBoosting...")
     clf.fit(X_train, y_train)
 
+    def _predict_binary(model, features):
+        if hasattr(model, "predict_proba"):
+            return (model.predict_proba(features)[:, 1] >= 0.5).astype(np.uint8)
+        return (model.decision_function(features) >= 0.0).astype(np.uint8)
+
+    eval_split = "train"
+    eval_pixels = len(y_train)
+    test_pixels = 0
+    y_eval = y_train
+    y_pred = _predict_binary(clf, X_train)
+
     if val_tiles:
         print("Building test pixel matrix...")
         X_val, y_val = build_xy_from_tiles(ds, val_tiles, cfg.pixels_per_tile, False, cfg.seed + 1)
         print(f"Test pixels: {len(y_val)}")
+        test_pixels = len(y_val)
         if len(y_val) > 0:
-            if hasattr(clf, "predict_proba"):
-                y_pred = (clf.predict_proba(X_val)[:, 1] >= 0.5).astype(np.uint8)
-            else:
-                y_pred = (clf.decision_function(X_val) >= 0.0).astype(np.uint8)
-            f1, iou = f1_iou(y_val, y_pred)
-            pos_rate = float(y_val.mean()) if len(y_val) > 0 else 0.0
-            print(f"Test: F1={f1:.4f} | IoU={iou:.4f} | PosRate={pos_rate:.3f}")
+            y_eval = y_val
+            y_pred = _predict_binary(clf, X_val)
+            eval_split = "test"
+            eval_pixels = len(y_val)
         else:
-            print("Test set had 0 pixels after filtering.")
+            print("Test set had 0 pixels after filtering. Falling back to train metrics.")
     else:
         print("No test tiles; reporting train metrics only.")
-        if hasattr(clf, "predict_proba"):
-            y_pred_tr = (clf.predict_proba(X_train)[:, 1] >= 0.5).astype(np.uint8)
-        else:
-            y_pred_tr = (clf.decision_function(X_train) >= 0.0).astype(np.uint8)
-        f1, iou = f1_iou(y_train, y_pred_tr)
-        pos_rate = float(y_train.mean())
-        print(f"Train: F1={f1:.4f} | IoU={iou:.4f} | PosRate={pos_rate:.3f}")
 
     if cfg.save_model:
         outp = Path(cfg.save_model)
         outp.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump(clf, outp)
         print(f"Saved model to {str(outp)}")
+        model_path = str(outp)
+    else:
+        model_path = None
+
+    f1, iou = f1_iou(y_eval, y_pred)
+    pos_rate = float(y_eval.mean()) if len(y_eval) > 0 else 0.0
+    if eval_split == "test":
+        print(f"Test: F1={f1:.4f} | IoU={iou:.4f} | PosRate={pos_rate:.3f}")
+    else:
+        print(f"Train: F1={f1:.4f} | IoU={iou:.4f} | PosRate={pos_rate:.3f}")
+
+    result: dict[str, Any] = {
+        "status": "completed",
+        "train_tiles": len(train_tiles),
+        "test_tiles": len(val_tiles),
+        "train_pixels": int(len(y_train)),
+        "test_pixels": int(test_pixels),
+        "evaluation_split": eval_split,
+        "evaluation_pixels": int(eval_pixels),
+        "metrics": {
+            "f1": float(f1),
+            "iou": float(iou),
+            "positive_rate": float(pos_rate),
+        },
+    }
+    if model_path:
+        result["model_path"] = model_path
+    return result
 
 
 def parse_args() -> Config:
@@ -165,4 +196,5 @@ def parse_args() -> Config:
 
 if __name__ == "__main__":
     cfg = parse_args()
-    train_and_eval(cfg)
+    res = train_and_eval(cfg)
+    print(res)

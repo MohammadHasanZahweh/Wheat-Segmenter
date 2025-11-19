@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import time
 from dataclasses import dataclass
 from typing import Dict, Any, List, Tuple
 from pathlib import Path
@@ -13,6 +15,7 @@ if str(project_root) not in sys.path:
 
 import numpy as np
 import joblib
+import requests
 import streamlit as st
 import folium
 from folium.plugins import Draw
@@ -24,6 +27,8 @@ import rasterio
 from rasterio.warp import transform_bounds
 
 from wheat_segmenter import WheatTilesDataset
+
+DEFAULT_DATA_ROOT = Path(os.environ.get("DATA_ROOT", r"C:\Users\Administrator\Desktop\preprocessed_data"))
 
 
 @dataclass
@@ -70,6 +75,12 @@ def _extract_features_all_valid(x_tb_hw: np.ndarray, valid_hw: np.ndarray):
     return flat[valid_idx].astype(np.float32), valid_idx
 
 
+def _parse_regions(text: str) -> List[str] | None:
+    tokens = [tok.strip() for tok in text.replace(",", " ").split()]
+    regions = [tok for tok in tokens if tok]
+    return regions or None
+
+
 def main_streamlit(app_cfg: AppConfig) -> None:
     st.set_page_config(page_title="Wheat Map (Lebanon)", layout="wide")
     st.title("🌾 Wheat Coverage Map (Lebanon)")
@@ -85,6 +96,18 @@ def main_streamlit(app_cfg: AppConfig) -> None:
     You cannot analyze areas outside these tiles!
     """)
 
+    with st.expander("🧠 Training Jobs (API)", expanded=False):
+        job_id = st.session_state.get("train_job_id")
+        job_status = st.session_state.get("train_job_status")
+        if job_id:
+            st.markdown(f"**Current job ID:** `{job_id}`")
+            if job_status:
+                st.json(job_status)
+            else:
+                st.info("No job status yet. Use the sidebar to refresh.")
+        else:
+            st.info("Configure and launch a training job from the sidebar to track it here.")
+
     # Sidebar configuration
     st.sidebar.header("⚙️ Configuration")
     
@@ -98,6 +121,183 @@ def main_streamlit(app_cfg: AppConfig) -> None:
     root = st.sidebar.text_input("Root (contains data/ and label/)", value=app_cfg.root)
     year = st.sidebar.text_input("Year", value=app_cfg.year)
     months_text = st.sidebar.text_input("Months (space-separated)", value=" ".join(map(str, app_cfg.months)))
+
+    # Common months tuple for dataset/training requests
+    if months_text.strip():
+        try:
+            months_sequence = tuple(int(m) for m in months_text.strip().split())
+        except ValueError:
+            st.sidebar.error("Invalid months input; falling back to defaults.")
+            months_sequence = app_cfg.months
+    else:
+        months_sequence = app_cfg.months
+
+    # Initialize training job state containers
+    if "train_job_id" not in st.session_state:
+        st.session_state["train_job_id"] = None
+    if "train_job_status" not in st.session_state:
+        st.session_state["train_job_status"] = None
+
+    # Training controls
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🧠 Train Model via API")
+    api_url = st.sidebar.text_input("API base URL", value="http://127.0.0.1:8000")
+    job_name = st.sidebar.text_input("Job name", value="streamlit_job")
+    algo_labels = {
+        "xgboost": "XGBoost",
+        "hist_gradient_boosting": "HistGradientBoosting",
+        "random_forest": "Random Forest",
+        "svm": "Support Vector Machine",
+    }
+    algorithm = st.sidebar.selectbox(
+        "Algorithm",
+        options=list(algo_labels.keys()),
+        format_func=lambda key: algo_labels.get(key, key.title()),
+    )
+    regions_text = st.sidebar.text_input("Regions (optional)", placeholder="e.g. 0 1 2")
+    train_fraction = st.sidebar.number_input(
+        "Train fraction",
+        min_value=0.001,
+        max_value=1.0,
+        value=0.01,
+        step=0.001,
+        format="%.3f",
+    )
+    test_fraction = st.sidebar.number_input(
+        "Test fraction",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.25,
+        step=0.05,
+        format="%.2f",
+    )
+    pixels_per_tile = st.sidebar.number_input(
+        "Pixels per tile",
+        min_value=256,
+        value=4096,
+        step=512,
+    )
+    balance_pixels = st.sidebar.checkbox("Balance sampled pixels", value=False)
+    seed = st.sidebar.number_input("Random seed", min_value=0, value=42, step=1)
+    save_model = st.sidebar.checkbox("Save trained model", value=True)
+    output_path = st.sidebar.text_input("Save path override (optional)", value="")
+
+    model_params: Dict[str, Any] = {}
+    with st.sidebar.expander(f"{algo_labels.get(algorithm, algorithm.title())} Hyperparameters", expanded=False):
+        if algorithm == "xgboost":
+            xgb_estimators = st.number_input("n_estimators", min_value=10, value=400, step=10, key="xgb_estimators")
+            xgb_depth = st.number_input("max_depth", min_value=1, value=8, step=1, key="xgb_depth")
+            xgb_lr = st.number_input("learning_rate", min_value=0.001, max_value=1.0, value=0.05, step=0.01, format="%.3f", key="xgb_lr")
+            xgb_subsample = st.number_input("subsample", min_value=0.1, max_value=1.0, value=0.8, step=0.05, format="%.2f", key="xgb_subsample")
+            xgb_colsample = st.number_input("colsample_bytree", min_value=0.1, max_value=1.0, value=0.8, step=0.05, format="%.2f", key="xgb_colsample")
+            model_params = {
+                "n_estimators": int(xgb_estimators),
+                "max_depth": int(xgb_depth),
+                "learning_rate": float(xgb_lr),
+                "subsample": float(xgb_subsample),
+                "colsample_bytree": float(xgb_colsample),
+            }
+        elif algorithm == "hist_gradient_boosting":
+            hgb_depth = st.number_input("max_depth (None for unlimited)", min_value=0, value=8, step=1, key="hgb_depth")
+            hgb_iter = st.number_input("max_iter", min_value=10, value=400, step=10, key="hgb_iter")
+            hgb_lr = st.number_input("learning_rate", min_value=0.001, max_value=1.0, value=0.05, step=0.01, format="%.3f", key="hgb_lr")
+            hgb_l2 = st.number_input("l2_regularization", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="hgb_l2")
+            model_params = {
+                "max_depth": int(hgb_depth),
+                "max_iter": int(hgb_iter),
+                "learning_rate": float(hgb_lr),
+                "l2_regularization": float(hgb_l2),
+            }
+        elif algorithm == "random_forest":
+            rf_estimators = st.number_input("n_estimators", min_value=10, value=200, step=10, key="rf_estimators")
+            rf_depth = st.number_input("max_depth (0=None)", min_value=0, value=0, step=1, key="rf_depth")
+            model_params = {
+                "rf_estimators": int(rf_estimators),
+                "rf_max_depth": int(rf_depth) if rf_depth > 0 else None,
+            }
+        elif algorithm == "svm":
+            svm_kernel = st.selectbox("kernel", options=["rbf", "linear", "poly", "sigmoid"], index=0, key="svm_kernel")
+            svm_c = st.number_input("C", min_value=0.1, value=1.0, step=0.1, format="%.2f", key="svm_c")
+            svm_gamma = st.text_input("gamma (scale, auto, or float)", value="scale", key="svm_gamma")
+            model_params = {
+                "svm_kernel": svm_kernel,
+                "svm_C": float(svm_c),
+                "svm_gamma": svm_gamma.strip() or "scale",
+            }
+
+    start_training = st.sidebar.button("🚀 Start Training Job", use_container_width=True)
+    refresh_training = st.sidebar.button(
+        "🔁 Refresh Job Status",
+        use_container_width=True,
+        disabled=not bool(st.session_state.get("train_job_id")),
+    )
+    clear_training = st.sidebar.button(
+        "🗑 Clear Job Info",
+        use_container_width=True,
+        disabled=not bool(st.session_state.get("train_job_id")),
+    )
+
+    training_feedback = st.sidebar.empty()
+
+    api_url_clean = api_url.rstrip("/")
+    if start_training:
+        if not api_url_clean:
+            training_feedback.error("Provide a valid API base URL.")
+        elif not root or not year:
+            training_feedback.error("Root and year are required to submit a training job.")
+        else:
+            dataset_cfg = {
+                "root": root,
+                "year": year,
+                "regions": _parse_regions(regions_text),
+                "months": list(months_sequence),
+                "train_fraction": float(train_fraction),
+                "test_fraction": float(test_fraction),
+                "pixels_per_tile": int(pixels_per_tile),
+                "balance_pixels": bool(balance_pixels),
+                "seed": int(seed),
+            }
+            payload = {
+                "job_name": job_name.strip() or f"streamlit_job_{int(time.time())}",
+                "algorithm": algorithm,
+                "dataset": dataset_cfg,
+                "save_model": bool(save_model),
+                "output_path": output_path.strip() or None,
+                "model_params": model_params or None,
+            }
+            try:
+                resp = requests.post(f"{api_url_clean}/train", json=payload, timeout=15)
+                resp.raise_for_status()
+                data = resp.json()
+                job_id = data.get("job_id")
+                if not job_id:
+                    raise ValueError(f"Unexpected response: {data}")
+                st.session_state["train_job_id"] = job_id
+                st.session_state["train_job_status"] = {"status": "running", **data}
+                training_feedback.success(f"Job started with id {job_id}")
+            except requests.RequestException as exc:
+                training_feedback.error(f"Failed to start job: {exc}")
+            except Exception as exc:
+                training_feedback.error(f"Unexpected error: {exc}")
+
+    if refresh_training and st.session_state.get("train_job_id"):
+        try:
+            resp = requests.get(
+                f"{api_url_clean}/train/status",
+                params={"id": st.session_state["train_job_id"]},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            status_data = resp.json()
+            st.session_state["train_job_status"] = status_data
+            training_feedback.info(f"Status: {status_data.get('status', 'unknown')}")
+        except requests.RequestException as exc:
+            training_feedback.error(f"Failed to fetch status: {exc}")
+
+    if clear_training and st.session_state.get("train_job_id"):
+        st.session_state["train_job_id"] = None
+        st.session_state["train_job_status"] = None
+        training_feedback.info("Cleared stored job info.")
 
     # Load data button
     load_clicked = st.sidebar.button("🔄 Load Dataset & Model", type="primary", use_container_width=True)
@@ -121,13 +321,12 @@ def main_streamlit(app_cfg: AppConfig) -> None:
     if "dataset" not in st.session_state or load_clicked:
         if root and year:
             try:
-                months = tuple(int(m) for m in months_text.strip().split()) if months_text.strip() else app_cfg.months
                 with st.spinner("Loading dataset..."):
                     ds = WheatTilesDataset(
                         root_preprocessed=root,
                         year=year,
                         regions=None,
-                        month_order=months,
+                        month_order=months_sequence,
                         temporal_layout=True,
                         normalize=True,
                         band_stats=None,
@@ -137,12 +336,13 @@ def main_streamlit(app_cfg: AppConfig) -> None:
                         size_policy="pad",
                         probe_limit=12,
                     )
-                    st.session_state["dataset"] = ds
-                    st.session_state["tiles_index"] = load_tiles_index(ds)
-                    st.sidebar.success(f"✅ Loaded {len(ds)} tiles")
+                st.session_state["dataset"] = ds
+                st.session_state["tiles_index"] = load_tiles_index(ds)
+                st.sidebar.success(f"✅ Loaded {len(ds)} tiles")
             except Exception as e:
                 st.sidebar.error(f"❌ Dataset load failed: {e}")
                 st.session_state["dataset"] = None
+                st.session_state["tiles_index"] = []
 
     # Status indicators
     st.sidebar.markdown("---")
@@ -421,14 +621,14 @@ def main_streamlit(app_cfg: AppConfig) -> None:
 
 def parse_cli() -> AppConfig:
     ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--root", default=".")
+    ap.add_argument("--root", default=str(DEFAULT_DATA_ROOT))
     ap.add_argument("--year", default="2020")
     ap.add_argument("--months", nargs="*", type=int, default=[11,12,1,2,3,4,5,6,7])
     try:
         args, _ = ap.parse_known_args()
     except SystemExit:
         class _Args: pass
-        args = _Args(); args.root = "."; args.year = "2020"; args.months = [11,12,1,2,3,4,5,6,7]
+        args = _Args(); args.root = str(DEFAULT_DATA_ROOT); args.year = "2020"; args.months = [11,12,1,2,3,4,5,6,7]
     return AppConfig(root=str(args.root), year=str(args.year), months=tuple(int(m) for m in args.months))
 
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, Any
 import numpy as np
 
-from server.config import ModelType, SklearnType, ModelRun, PIXEL_SPLIT_DATA_PATH, TrainRequest, MODELS_PATH
+from server.config import ModelType, SklearnType, ModelRun, PIXEL_SPLIT_DATA_PATH, PixelTrainRequest, MODELS_PATH
 from dataset.PixelDataset import PixelRangeNPYDataset, PixelFromKNPYDataset
 
 from model import keras_pixel_model
@@ -13,7 +13,7 @@ from model import keras_pixel_model
 # -------------------------------------------------------
 # Train routine
 # -------------------------------------------------------
-def train_pixel_model(req:TrainRequest) -> Dict[str, Any]:
+def train_pixel_model(req: PixelTrainRequest) -> Dict[str, Any]:
     print("[INFO] Loading datasets...")
 
     root = PIXEL_SPLIT_DATA_PATH / req.class_root
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     sys.path.append("..")
     import os
     os.chdir("../server")
-    train_pixel_model(TrainRequest(
+    train_pixel_model(PixelTrainRequest(
         run_save_name="t1",
         model_type=ModelType.SKLEARN,
         sub_model_type=SklearnType.LogisticRegression,

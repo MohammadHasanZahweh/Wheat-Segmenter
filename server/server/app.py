@@ -1,34 +1,134 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Callable, Dict
 
-from fastapi import FastAPI, BackgroundTasks
-from fastapi import Body
+from fastapi import FastAPI
 
-# import threading
-# import time
-
-import numpy as np
-# from PIL import Image
-# from pathlib import Path
-
-# from src.data.sentinel2 import load_s2_stack, compute_indices
-# from src.data.tiling import extract_patches
-# from src.inference.service import run_batch
-# from src.train.train_supervised import train_from_config
-# from src.train.finetune import finetune_from_checkpoint
-# from src.data.dataset import PatchDataset
-# from src.utils.config import load_yaml_config
-
-# import torch
-
-
-import time
 import threading
-from .config import DATA_PATH, MODELS_PATH, TrainRequest
-from train.pixel_sklearn_train import train_pixel_model
+import time
+from uuid import uuid4
+
+from .config import MODELS_PATH, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm
+from server.train import train_histgb, train_rf_baseline, train_svm_baseline, train_xgboost
 
 app = FastAPI(title="Wheat Mapping API")
+
+
+def _dataset_kwargs(cfg: TileDatasetConfig) -> dict[str, Any]:
+    return {
+        "root": cfg.root,
+        "year": cfg.year,
+        "regions": cfg.regions,
+        "months": tuple(cfg.months),
+        "train_fraction": cfg.train_fraction,
+        "test_fraction": cfg.test_fraction,
+        "pixels_per_tile": cfg.pixels_per_tile,
+        "balance_pixels": cfg.balance_pixels,
+        "seed": cfg.seed,
+    }
+
+
+def _resolve_save_path(req: TileTrainRequest) -> str | None:
+    if not req.save_model:
+        return None
+    if req.output_path:
+        return str(Path(req.output_path))
+    default_name = f"{req.job_name}_{req.algorithm.value}.joblib"
+    return str((MODELS_PATH / default_name).resolve())
+
+
+def _run_svm_job(req: TileTrainRequest) -> dict[str, Any]:
+    params = {"svm_kernel": "rbf", "svm_C": 1.0, "svm_gamma": "scale"}
+    params.update(req.model_params or {})
+    gamma_raw = params.get("svm_gamma", "scale")
+    try:
+        gamma_val: str | float = float(gamma_raw)
+    except (TypeError, ValueError):
+        gamma_val = str(gamma_raw)
+    cfg = train_svm_baseline.Config(
+        **_dataset_kwargs(req.dataset),
+        svm_kernel=str(params.get("svm_kernel", "rbf")),
+        svm_C=float(params.get("svm_C", 1.0)),
+        svm_gamma=gamma_val,
+        save_model=_resolve_save_path(req),
+    )
+    return train_svm_baseline.train_and_eval(cfg)
+
+
+def _run_rf_job(req: TileTrainRequest) -> dict[str, Any]:
+    params = {"rf_estimators": 200, "rf_max_depth": None}
+    params.update(req.model_params or {})
+    depth = params.get("rf_max_depth", None)
+    cfg = train_rf_baseline.Config(
+        **_dataset_kwargs(req.dataset),
+        rf_estimators=int(params.get("rf_estimators", 200)),
+        rf_max_depth=None if depth in (None, 0, "0", "None") else int(depth),
+        save_model=_resolve_save_path(req),
+    )
+    return train_rf_baseline.train_and_eval(cfg)
+
+
+def _run_histgb_job(req: TileTrainRequest) -> dict[str, Any]:
+    params = {
+        "max_depth": 8,
+        "max_iter": 400,
+        "learning_rate": 0.05,
+        "l2_regularization": 0.0,
+    }
+    params.update(req.model_params or {})
+    depth = params.get("max_depth", 8)
+    cfg = train_histgb.Config(
+        **_dataset_kwargs(req.dataset),
+        max_depth=None if depth in (None, 0, "0", "None") else int(depth),
+        max_iter=int(params.get("max_iter", 400)),
+        learning_rate=float(params.get("learning_rate", 0.05)),
+        l2_regularization=float(params.get("l2_regularization", 0.0)),
+        save_model=_resolve_save_path(req),
+    )
+    return train_histgb.train_and_eval(cfg)
+
+
+def _run_xgb_job(req: TileTrainRequest) -> dict[str, Any]:
+    params = {
+        "n_estimators": 400,
+        "max_depth": 8,
+        "learning_rate": 0.05,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+    }
+    params.update(req.model_params or {})
+    cfg = train_xgboost.Config(
+        **_dataset_kwargs(req.dataset),
+        n_estimators=int(params.get("n_estimators", 400)),
+        max_depth=int(params.get("max_depth", 8)),
+        learning_rate=float(params.get("learning_rate", 0.05)),
+        subsample=float(params.get("subsample", 0.8)),
+        colsample_bytree=float(params.get("colsample_bytree", 0.8)),
+        save_model=_resolve_save_path(req),
+    )
+    return train_xgboost.train_and_eval(cfg)
+
+
+TRAINING_RUNNERS: Dict[TrainingAlgorithm, Callable[[TileTrainRequest], dict[str, Any]]] = {
+    TrainingAlgorithm.SVM: _run_svm_job,
+    TrainingAlgorithm.RANDOM_FOREST: _run_rf_job,
+    TrainingAlgorithm.HISTOGRAM_GB: _run_histgb_job,
+    TrainingAlgorithm.XGBOOST: _run_xgb_job,
+}
+
+
+def _run_tile_training(req: TileTrainRequest) -> dict[str, Any]:
+    runner = TRAINING_RUNNERS.get(req.algorithm)
+    if runner is None:
+        raise ValueError(f"Unsupported algorithm {req.algorithm}")
+    result = runner(req)
+    result.setdefault("status", "completed")
+    result["algorithm"] = req.algorithm.value
+    result["job_name"] = req.job_name
+    return result
+
+
+jobs: Dict[str, Dict[str, Any]] = {}
 
 
 @app.get("/health")
@@ -36,43 +136,34 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-jobs: Dict[str, Dict] = {}
-
-
-# -------------------------------------------------------
-# Background threaded job
-# -------------------------------------------------------
-def train_job(job_id: str, req: TrainRequest):
+def train_job(job_id: str, payload: dict[str, Any]) -> None:
     try:
-        result = train_pixel_model(req)
+        req = TileTrainRequest(**payload)
+        result = _run_tile_training(req)
         jobs[job_id].update(result)
-    except Exception as e:
-        jobs[job_id].update({"status": "failed", "error": str(e)})
+        jobs[job_id]["status"] = "completed"
+    except Exception as exc:  # pragma: no cover - surfaced via API
+        jobs[job_id].update({"status": "failed", "error": str(exc)})
 
 
-# -------------------------------------------------------
-# Start training
-# -------------------------------------------------------
 @app.post("/train")
-def start_train(req: TrainRequest):
-    print("Starting training")
-    job_id = f"job_{int(time.time())}"
-    jobs[job_id] = {"status": "running"}
+def start_train(req: TileTrainRequest):
+    job_id = f"job_{uuid4().hex}"
+    jobs[job_id] = {
+        "status": "running",
+        "job_name": req.job_name,
+        "algorithm": req.algorithm.value,
+        "submitted_at": time.time(),
+    }
+    payload = req.dict()
+    thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
+    thread.start()
+    return {"job_id": job_id, "status": "running"}
 
-    train_job(job_id, req)
-    # t = threading.Thread(target=train_job, args=(job_id, req), daemon=True)
-    # t.start()
 
-    return {"job_id": job_id, "status": "started"}
-
-
-# -------------------------------------------------------
-# Training status
-# -------------------------------------------------------
 @app.get("/train/status")
 def train_status(id: str):
     return jobs.get(id, {"status": "unknown"})
-
 
 
 # jobs: dict[str, dict] = {}
