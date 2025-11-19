@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import pandas as pd
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, Dict
-from pydantic import BaseModel
+from typing import Any, Optional, Dict, List
+from pydantic import BaseModel, Field
 
 
 DATA_PATH   = Path(os.getenv("DATA_PATH", r"D:\image_lebanon\Lebanon\blbk_dataset\Requested_Tiffs_lcc"))
@@ -39,14 +39,51 @@ class SklearnType(Enum):
     KNN = "KNN"
     LR = "LR"
     METHOD3 = "M3"
-    METHOD4 = "M4"   
+    METHOD4 = "M4"
 
-class TrainRequest(BaseModel):
-    ## TODO: add batch size
-    ## TODO: add Torch types and XGBOOST
+
+class PixelTrainRequest(BaseModel):
+    """
+    Legacy pixel-level training request used by pixel_sklearn_train.
+    """
+
     run_save_name: str
     model_type: ModelType
-    sub_model_type: SklearnType #| TorchType | XGBOOSTType
+    sub_model_type: SklearnType  # | TorchType | XGBOOSTType
     val_batches: int
     train_batches: int
     class_root: str = "wheat"
+
+
+class TrainingAlgorithm(str, Enum):
+    SVM = "svm"
+    RANDOM_FOREST = "random_forest"
+    HISTOGRAM_GB = "hist_gradient_boosting"
+    XGBOOST = "xgboost"
+
+
+class TileDatasetConfig(BaseModel):
+    root: str
+    year: str
+    regions: Optional[List[str]] = None
+    months: List[int] = Field(
+        default_factory=lambda: [11, 12, 1, 2, 3, 4, 5, 6, 7]
+    )
+    train_fraction: float = 0.01
+    test_fraction: float = 0.25
+    pixels_per_tile: int = 4096
+    balance_pixels: bool = False
+    seed: int = 42
+
+
+class TileTrainRequest(BaseModel):
+    """
+    Request payload for API-triggered tile-based training jobs.
+    """
+
+    job_name: str
+    algorithm: TrainingAlgorithm
+    dataset: TileDatasetConfig
+    save_model: bool = True
+    output_path: Optional[str] = None
+    model_params: Optional[Dict[str, Any]] = None
