@@ -12,3 +12,4 @@ streamlit==1.39.0
 folium==0.17.0
 streamlit-folium==0.20.0
 shapely==2.0.4
+ploty==5.15.0
