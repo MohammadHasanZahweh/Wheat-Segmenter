@@ -51,26 +51,35 @@ def inject_global_styles() -> None:
     st.markdown(
         """
         <style>
-        .stApp {
-            background: #020617;
+        :root {
+            --bg1: #0a1526;
+            --bg2: #07101d;
+            --panel: rgba(11, 20, 34, 0.9);
+            --accent: #5ee6a0;
+            --accent-2: #74f1ff;
+            --border: rgba(115, 161, 255, 0.3);
+        }
+        .stApp, [data-testid="stAppViewContainer"] {
+            background: linear-gradient(160deg, var(--bg1) 0%, var(--bg2) 50%, #050915 100%);
         }
         .block-container {
             padding-top: 1.5rem;
             padding-bottom: 2rem;
+            background: transparent;
         }
         .main-block {
             padding: 1.5rem 1.75rem;
             border-radius: 1rem;
-            background: rgba(15, 23, 42, 0.98);
-            border: 1px solid rgba(148, 163, 184, 0.4);
+            background: var(--panel);
+            border: 1px solid var(--border);
             margin-bottom: 1.5rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
         }
         .main-title {
             font-size: 2.1rem;
             font-weight: 700;
             margin-bottom: 0.25rem;
-            background: linear-gradient(135deg, #7FFF00, #00FF00);
+            background: linear-gradient(120deg, var(--accent-2), var(--accent));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -84,37 +93,45 @@ def inject_global_styles() -> None:
             margin-bottom: 0.25rem;
         }
         section[data-testid="stSidebar"] {
-            background: #020617;
+            background: linear-gradient(180deg, #0c1830 0%, #081122 100%);
         }
         .sidebar-title {
             font-weight: 600;
             font-size: 1rem;
             margin-bottom: 0.5rem;
-            color: #7FFF00;
+            color: var(--accent);
         }
         .metrics-row {
             padding: 0.75rem 1rem 0.25rem 1rem;
             border-radius: 0.9rem;
-            background: rgba(15,23,42,0.95);
-            border: 1px solid rgba(51,65,85,0.9);
+            background: linear-gradient(120deg, rgba(12,25,43,0.95), rgba(9,18,34,0.95));
+            border: 1px solid var(--border);
             margin-top: 0.75rem;
             margin-bottom: 0.75rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
         }
         .stat-card {
-            background: rgba(30, 41, 59, 0.8);
-            border-left: 4px solid #7FFF00;
+            background: rgba(13, 24, 41, 0.9);
+            border-left: 4px solid var(--accent);
             padding: 1rem;
             border-radius: 0.5rem;
             margin: 0.5rem 0;
         }
         .highlight-positive {
-            color: #00FF00;
+            color: var(--accent);
             font-weight: 600;
         }
         .highlight-warning {
-            color: #FFA500;
+            color: #ffba66;
             font-weight: 600;
+        }
+        /* Fix white header bars */
+        header[data-testid="stHeader"], .stToolbar {
+            background: transparent;
+        }
+        /* Tabs text color */
+        .stTabs [data-baseweb="tab"] {
+            color: #cbd5e1;
         }
         </style>
         """,
@@ -208,7 +225,13 @@ def _export_geojson(
                     "tile_id": row["tile_id"],
                     "region": row["region"],
                     "wheat_coverage": row["coverage_pred"],
+                    "wheat_coverage_gt": row.get("coverage_gt"),
+                    "coverage_delta": row.get("coverage_delta"),
                     "pixels_analyzed": row["n_pixels"],
+                    "n_valid_total": row.get("n_valid_total"),
+                    "precision": row.get("precision"),
+                    "recall": row.get("recall"),
+                    "iou": row.get("iou"),
                     "timestamp": datetime.now().isoformat(),
                 },
             }
@@ -319,6 +342,73 @@ def _create_summary_statistics(cover_rows: List[Dict[str, Any]]) -> Dict[str, An
         "max": float(np.max(coverages)),
         "q25": float(np.percentile(coverages, 25)),
         "q75": float(np.percentile(coverages, 75)),
+    }
+
+
+def _calc_pr_metrics(pred: np.ndarray, target: np.ndarray) -> Dict[str, Any]:
+    """Precision/recall/IoU over boolean vectors, returns counts for aggregation."""
+    if pred.size == 0 or target.size == 0:
+        return {"tp": 0, "fp": 0, "fn": 0, "tn": 0, "precision": None, "recall": None, "iou": None}
+
+    pred_b = pred.astype(bool)
+    tgt_b = target.astype(bool)
+
+    tp = int(np.logical_and(pred_b, tgt_b).sum())
+    fp = int(np.logical_and(pred_b, ~tgt_b).sum())
+    fn = int(np.logical_and(~pred_b, tgt_b).sum())
+    tn = int(np.logical_and(~pred_b, ~tgt_b).sum())
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else None
+    recall = tp / (tp + fn) if (tp + fn) > 0 else None
+    iou = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else None
+
+    return {
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "tn": tn,
+        "precision": precision,
+        "recall": recall,
+        "iou": iou,
+    }
+
+
+def _aggregate_verification(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate per-tile verification metrics."""
+    has_gt = [r for r in rows if r.get("coverage_gt") is not None]
+    if not has_gt:
+        return {
+            "avg_gt": None,
+            "avg_delta": None,
+            "precision": None,
+            "recall": None,
+            "f1": None,
+            "iou": None,
+        }
+
+    avg_gt = float(np.mean([r["coverage_gt"] for r in has_gt]))
+    avg_delta = float(np.mean([r["coverage_delta"] for r in has_gt]))
+
+    tp = sum(r.get("tp", 0) for r in has_gt)
+    fp = sum(r.get("fp", 0) for r in has_gt)
+    fn = sum(r.get("fn", 0) for r in has_gt)
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else None
+    recall = tp / (tp + fn) if (tp + fn) > 0 else None
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision is not None and recall is not None and (precision + recall) > 0)
+        else None
+    )
+    iou = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else None
+
+    return {
+        "avg_gt": avg_gt,
+        "avg_delta": avg_delta,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "iou": iou,
     }
 
 
@@ -744,6 +834,7 @@ def main_streamlit(app_cfg: AppConfig) -> None:
 
                         x = item["x"].numpy()  # (T,B,H,W)
                         valid = item["valid_mask"].numpy()[0] > 0.5
+                        n_valid_total = int(valid.sum())
 
                         flat, valid_idx = _extract_features_all_valid(x, valid)
 
@@ -752,6 +843,13 @@ def main_streamlit(app_cfg: AppConfig) -> None:
                             sampled = rng.choice(len(valid_idx), cap, replace=False)
                             valid_idx = valid_idx[sampled]
                             flat = flat[sampled]
+
+                        coverage_gt = None
+                        coverage_delta = None
+                        precision = None
+                        recall = None
+                        iou = None
+                        tp = fp = fn = tn = 0
 
                         if len(flat) == 0:
                             cov = 0.0
@@ -764,12 +862,41 @@ def main_streamlit(app_cfg: AppConfig) -> None:
                             pred = (proba >= prob_th).astype(np.uint8)
                             cov = float(pred.mean())
 
+                            # Ground-truth verification
+                            if "wheat_mask" in item:
+                                wheat = item["wheat_mask"].numpy()[0] > 0.5
+                                gt_flat = wheat.reshape(-1)[valid_idx]
+                                if gt_flat.size > 0:
+                                    coverage_gt = float(gt_flat.mean())
+                                    coverage_delta = round(cov - coverage_gt, 4)
+                                    metrics = _calc_pr_metrics(pred, gt_flat)
+                                    precision = metrics["precision"]
+                                    recall = metrics["recall"]
+                                    iou = metrics["iou"]
+                                    tp, fp, fn, tn = (
+                                        metrics["tp"],
+                                        metrics["fp"],
+                                        metrics["fn"],
+                                        metrics["tn"],
+                                    )
+
                         cover_rows.append(
                             {
                                 "region": rec["region"],
                                 "tile_id": rec["tile_id"],
                                 "coverage_pred": round(cov, 4),
+                                "coverage_gt": None if coverage_gt is None else round(coverage_gt, 4),
+                                "coverage_delta": coverage_delta,
+                                "precision": precision,
+                                "recall": recall,
+                                "iou": iou,
+                                "tp": tp,
+                                "fp": fp,
+                                "fn": fn,
+                                "tn": tn,
                                 "n_pixels": len(flat),
+                                "n_valid_total": n_valid_total,
+                                "sample_rate": (len(flat) / n_valid_total) if n_valid_total > 0 else None,
                             }
                         )
                         prog.progress(
@@ -841,6 +968,9 @@ def main_streamlit(app_cfg: AppConfig) -> None:
         avg_cov = float(np.mean([r["coverage_pred"] for r in filtered_rows]))
         max_cov = max([r["coverage_pred"] for r in filtered_rows])
         high_cov_count = sum(1 for r in filtered_rows if r["coverage_pred"] > 0.5)
+        verification_summary = _aggregate_verification(filtered_rows)
+        fmt_pct = lambda v: f"{v:.2%}" if v is not None else "—"
+        fmt_delta = lambda v: f"{v:+.2%}" if v is not None else "—"
 
         st.markdown('<div class="metrics-row">', unsafe_allow_html=True)
         mcol1, mcol2, mcol3, mcol4 = st.columns(4)
@@ -852,6 +982,21 @@ def main_streamlit(app_cfg: AppConfig) -> None:
             st.metric("Max Coverage", f"{max_cov:.2%}")
         with mcol4:
             st.metric("High Coverage Tiles (>50%)", high_cov_count)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="metrics-row">', unsafe_allow_html=True)
+        vcol1, vcol2, vcol3, vcol4 = st.columns(4)
+        with vcol1:
+            st.metric("Avg GT Coverage", fmt_pct(verification_summary["avg_gt"]))
+        with vcol2:
+            st.metric("Avg Coverage Δ (Pred-GT)", fmt_delta(verification_summary["avg_delta"]))
+        with vcol3:
+            st.metric("IoU (micro)", fmt_pct(verification_summary["iou"]))
+        with vcol4:
+            st.metric(
+                "Precision / Recall",
+                f"{fmt_pct(verification_summary['precision'])} / {fmt_pct(verification_summary['recall'])}",
+            )
         st.markdown("</div>", unsafe_allow_html=True)
 
         # Tabs
@@ -878,12 +1023,20 @@ def main_streamlit(app_cfg: AppConfig) -> None:
             for rec, row in zip(idx_for_map, rows_for_map):
                 poly = _bounds_to_polygon(rec["bounds"])
                 color = cov_color(row["coverage_pred"])
+                properties = {
+                    "tile_id": row.get("tile_id"),
+                    "region": row.get("region"),
+                    "coverage_pred": row.get("coverage_pred"),
+                    "coverage_gt": row.get("coverage_gt"),
+                    "coverage_delta": row.get("coverage_delta"),
+                    "n_pixels": row.get("n_pixels"),
+                }
 
                 folium.GeoJson(
                     data={
                         "type": "Feature",
                         "geometry": poly.__geo_interface__,
-                        "properties": row,
+                        "properties": properties,
                     },
                     style_function=lambda feat, col=color: {
                         "fillColor": col,
@@ -892,8 +1045,8 @@ def main_streamlit(app_cfg: AppConfig) -> None:
                         "fillOpacity": 0.7,
                     },
                     tooltip=folium.GeoJsonTooltip(
-                        fields=["tile_id", "coverage_pred", "n_pixels"],
-                        aliases=["Tile ID", "Wheat Coverage", "Pixels Sampled"],
+                        fields=["tile_id", "coverage_pred", "coverage_gt", "coverage_delta", "n_pixels"],
+                        aliases=["Tile ID", "Wheat Coverage", "GT Coverage", "Delta", "Pixels Sampled"],
                         localize=True,
                     ),
                 ).add_to(results_map)
@@ -955,14 +1108,52 @@ def main_streamlit(app_cfg: AppConfig) -> None:
             st.subheader("📋 Detailed Results (after filters)")
             df = pd.DataFrame(filtered_rows)
             df_display = df.copy()
+            for missing_col in (
+                "coverage_gt",
+                "coverage_delta",
+                "precision",
+                "recall",
+                "iou",
+                "n_valid_total",
+                "sample_rate",
+            ):
+                if missing_col not in df_display:
+                    df_display[missing_col] = np.nan
             df_display["coverage_pred"] = df_display["coverage_pred"].apply(
                 lambda x: f"{x:.1%}"
             )
+            df_display["coverage_gt"] = df_display["coverage_gt"].apply(
+                lambda x: f"{x:.1%}" if pd.notnull(x) else "—"
+            )
+            df_display["coverage_delta"] = df_display["coverage_delta"].apply(
+                lambda x: f"{x:+.1%}" if pd.notnull(x) else "—"
+            )
+            for col in ("precision", "recall", "iou"):
+                df_display[col] = df_display[col].apply(lambda v: f"{v:.1%}" if pd.notnull(v) else "—")
+            df_display["sample_rate"] = df_display["sample_rate"].apply(
+                lambda v: f"{v:.1%}" if pd.notnull(v) else "—"
+            )
+            ordered_cols = [
+                "region",
+                "tile_id",
+                "coverage_pred",
+                "coverage_gt",
+                "coverage_delta",
+                "precision",
+                "recall",
+                "iou",
+                "n_pixels",
+                "n_valid_total",
+                "sample_rate",
+            ]
+            df_display = df_display[[c for c in ordered_cols if c in df_display.columns]]
             st.dataframe(df_display, use_container_width=True, hide_index=True)
 
         # TAB 4: STATISTICS
         with tab4:
             stats = _create_summary_statistics(filtered_rows)
+            gt_values = [r["coverage_gt"] for r in filtered_rows if r.get("coverage_gt") is not None]
+            delta_values = [r["coverage_delta"] for r in filtered_rows if r.get("coverage_delta") is not None]
 
             col1, col2 = st.columns(2)
             with col1:
@@ -1011,6 +1202,56 @@ def main_streamlit(app_cfg: AppConfig) -> None:
                     unsafe_allow_html=True,
                 )
 
+            if gt_values:
+                stats_gt_arr = np.array(gt_values)
+                stats_gt = {
+                    "mean": float(np.mean(stats_gt_arr)),
+                    "median": float(np.median(stats_gt_arr)),
+                    "min": float(np.min(stats_gt_arr)),
+                    "max": float(np.max(stats_gt_arr)),
+                }
+
+                st.markdown("---")
+                gcol1, gcol2 = st.columns(2)
+                with gcol1:
+                    st.markdown(
+                        """
+                        <div class="stat-card">
+                            <strong>Ground Truth Coverage</strong><br>
+                            Mean: <span class="highlight-positive">{mean:.1%}</span><br>
+                            Median: <span class="highlight-positive">{median:.1%}</span><br>
+                            Range: <span class="highlight-warning">{min:.1%}</span> → <span class="highlight-positive">{max:.1%}</span>
+                        </div>
+                        """.format(**stats_gt),
+                        unsafe_allow_html=True,
+                    )
+
+                with gcol2:
+                    ver = verification_summary
+                    st.markdown(
+                        """
+                        <div class="stat-card">
+                            <strong>Verification (micro)</strong><br>
+                            Precision: <span class="highlight-positive">{precision}</span><br>
+                            Recall: <span class="highlight-positive">{recall}</span><br>
+                            IoU: <span class="highlight-positive">{iou}</span><br>
+                            F1: <span class="highlight-positive">{f1}</span>
+                        </div>
+                        """.format(
+                            precision=fmt_pct(ver.get("precision")),
+                            recall=fmt_pct(ver.get("recall")),
+                            iou=fmt_pct(ver.get("iou")),
+                            f1=fmt_pct(ver.get("f1")),
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+                if delta_values:
+                    delta_avg = float(np.mean(delta_values))
+                    st.info(f"Average coverage delta (pred - GT): {fmt_delta(delta_avg)}")
+            else:
+                st.info("Ground-truth masks not available in the current results; verification skipped.")
+
         # TAB 5: EXPORT
         with tab5:
             stats_all = _create_summary_statistics(filtered_rows)
@@ -1025,11 +1266,41 @@ def main_streamlit(app_cfg: AppConfig) -> None:
 
             # CSV
             with col_csv:
-                csv_data = "region,tile_id,coverage_pred,n_pixels\n"
-                csv_data += "\n".join(
-                    f"{r['region']},{r['tile_id']},{r['coverage_pred']:.4f},{r['n_pixels']}"
-                    for r in filtered_rows
-                )
+                fmt = lambda v: "" if v is None or (isinstance(v, float) and np.isnan(v)) else f"{float(v):.4f}"
+                csv_headers = [
+                    "region",
+                    "tile_id",
+                    "coverage_pred",
+                    "coverage_gt",
+                    "coverage_delta",
+                    "precision",
+                    "recall",
+                    "iou",
+                    "n_pixels",
+                    "n_valid_total",
+                    "sample_rate",
+                ]
+                csv_data = ",".join(csv_headers) + "\n"
+                csv_rows = []
+                for r in filtered_rows:
+                    csv_rows.append(
+                        ",".join(
+                            [
+                                str(r["region"]),
+                                str(r["tile_id"]),
+                                fmt(r.get("coverage_pred")),
+                                fmt(r.get("coverage_gt")),
+                                fmt(r.get("coverage_delta")),
+                                fmt(r.get("precision")),
+                                fmt(r.get("recall")),
+                                fmt(r.get("iou")),
+                                str(r.get("n_pixels", "")),
+                                str(r.get("n_valid_total", "")),
+                                fmt(r.get("sample_rate")),
+                            ]
+                        )
+                    )
+                csv_data += "\n".join(csv_rows)
                 st.download_button(
                     "📥 CSV",
                     data=csv_data,
@@ -1059,6 +1330,7 @@ def main_streamlit(app_cfg: AppConfig) -> None:
                             "year": year,
                             "tiles_count": len(filtered_rows),
                             "statistics": stats_all,
+                            "verification": verification_summary,
                             "filters": {
                                 "regions": selected_regions,
                                 "coverage_min": cov_min,
@@ -1089,11 +1361,18 @@ def main_streamlit(app_cfg: AppConfig) -> None:
 - Regions: {', '.join(selected_regions)}
 - Coverage range: {cov_min:.2f} – {cov_max:.2f}
 
-## Overview
-- **Total Tiles Analyzed:** {len(filtered_rows)}
-- **Average Coverage:** {stats_all["mean"]:.2%}
-- **Coverage Range:** {stats_all["min"]:.2%} – {stats_all["max"]:.2%}
-- **High Coverage Tiles (>50%):** {high_cov_count_filtered} ({high_percentage:.1f}%)
+    ## Overview
+    - **Total Tiles Analyzed:** {len(filtered_rows)}
+    - **Average Coverage:** {stats_all["mean"]:.2%}
+    - **Coverage Range:** {stats_all["min"]:.2%} – {stats_all["max"]:.2%}
+    - **High Coverage Tiles (>50%):** {high_cov_count_filtered} ({high_percentage:.1f}%)
+
+## Verification (micro)
+- **Ground Truth Avg Coverage:** {fmt_pct(verification_summary.get("avg_gt"))}
+- **Avg Delta (Pred - GT):** {fmt_delta(verification_summary.get("avg_delta"))}
+- **Precision / Recall:** {fmt_pct(verification_summary.get("precision"))} / {fmt_pct(verification_summary.get("recall"))}
+- **IoU:** {fmt_pct(verification_summary.get("iou"))}
+- **F1:** {fmt_pct(verification_summary.get("f1"))}
 
 ## Statistics
 - **Median:** {stats_all["median"]:.2%}
