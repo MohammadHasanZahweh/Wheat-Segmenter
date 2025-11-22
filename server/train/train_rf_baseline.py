@@ -34,6 +34,7 @@ class Config:
     rf_estimators: int
     rf_max_depth: int | None
     save_model: str | None
+    use_meta_stats: bool
 
 
 def load_dataset(cfg: Config) -> WheatTilesDataset:
@@ -44,7 +45,8 @@ def load_dataset(cfg: Config) -> WheatTilesDataset:
         month_order=cfg.months,
         temporal_layout=True,
         normalize=True,
-        band_stats=None,
+        band_stats='auto' if cfg.use_meta_stats else None,
+        meta_dir='./meta' if cfg.use_meta_stats else None,
         require_complete=True,
         target_bands=None,
         target_size=(64, 64),
@@ -205,6 +207,11 @@ def parse_args() -> Config:
         default=None,
         help="Optional path to save the trained model (.joblib)",
     )
+    p.add_argument(
+        "--use-meta-stats",
+        action="store_true",
+        help="Use precomputed meta statistics for normalization (./meta/)",
+    )
 
     a = p.parse_args()
     months = tuple(int(m) for m in a.months)
@@ -222,6 +229,7 @@ def parse_args() -> Config:
         rf_estimators=int(a.rf_estimators),
         rf_max_depth=rf_max_depth,
         save_model=str(a.save_model) if a.save_model else None,
+        use_meta_stats=bool(a.use_meta_stats),
     )
 
 

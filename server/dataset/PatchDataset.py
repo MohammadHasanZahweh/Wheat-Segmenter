@@ -24,6 +24,43 @@ import torch
 from torch.utils.data import Dataset, Sampler, Subset
 
 
+def load_meta_stats(meta_dir: Path, year: str, months: Sequence[int]) -> Dict[int, Dict[str, np.ndarray]]:
+    """
+    Load precomputed mean/std statistics from meta directory.
+    
+    Expected structure:
+        meta/<YEAR>_<MONTH>.npz containing 'mean' and 'std' arrays
+    
+    Args:
+        meta_dir: Path to meta directory
+        year: Year string (e.g., '2020')
+        months: Sequence of month integers to load
+    
+    Returns:
+        Dict mapping month -> {'mean': np.ndarray, 'std': np.ndarray}
+        Each array has shape (num_bands,)
+    
+    Example:
+        >>> stats = load_meta_stats(Path('./meta'), '2020', [11, 12, 1])
+        >>> stats[11]['mean']  # array of shape (13,) with mean for each band in Nov
+    """
+    meta_stats = {}
+    for month in months:
+        npz_path = meta_dir / f"{year}_{month}.npz"
+        if not npz_path.exists():
+            print(f"[WARN] Meta stats not found: {npz_path}, skipping month {month}")
+            continue
+        data = np.load(npz_path)
+        if 'mean' not in data or 'std' not in data:
+            print(f"[WARN] Meta file {npz_path} missing 'mean' or 'std', skipping")
+            continue
+        meta_stats[month] = {
+            'mean': data['mean'].astype(np.float32),
+            'std': data['std'].astype(np.float32)
+        }
+    return meta_stats
+
+
 class WheatTilesDataset(Dataset):
     """
     Multi-temporal Sentinel-2 dataset for wheat segmentation.
@@ -31,11 +68,41 @@ class WheatTilesDataset(Dataset):
     Structure:
         data/<YEAR>/<REGION>/<MONTH>/<TILE_ID>.tif   # ~11–13 bands, 64×64 (usually)
         label/<YEAR>/<REGION>/<TILE_ID>.tif          # 2 layers: [0]=valid, [1]=wheat
+        meta/<YEAR>_<MONTH>.npz                      # Optional: precomputed mean/std per month
 
     LAZY version:
       - Index is built from filenames only (fast).
       - Only a small probe (limit) is used to infer bands & size.
       - Size/band fixes happen at read-time (pad/trim), not during __init__.
+    
+    Normalization Options:
+      1. Per-tile min-max (default): band_stats=None, meta_dir=None
+         Each tile normalized independently to [0,1] per band
+      
+      2. Meta statistics (recommended): band_stats='auto', meta_dir='./meta'
+         Uses precomputed mean/std from meta/<year>_<month>.npz files
+         Applies z-score normalization: (x - mean) / std per month and band
+      
+      3. Custom statistics: band_stats={band: (mean, std), ...}
+         Provide your own normalization parameters
+    
+    Example Usage:
+        # With meta stats (recommended for training)
+        >>> ds = WheatTilesDataset(
+        ...     root_preprocessed="./preprocessed_data",
+        ...     year="2020",
+        ...     normalize=True,
+        ...     band_stats='auto',
+        ...     meta_dir='./meta'
+        ... )
+        
+        # Without meta stats (per-tile normalization)
+        >>> ds = WheatTilesDataset(
+        ...     root_preprocessed="./preprocessed_data",
+        ...     year="2020",
+        ...     normalize=True,
+        ...     band_stats=None
+        ... )
     """
     
     def __init__(
@@ -46,7 +113,8 @@ class WheatTilesDataset(Dataset):
         month_order=(11, 12, 1, 2, 3, 4, 5, 6, 7),
         temporal_layout=False,                  # True -> [T,B,64,64]; False -> [C,64,64]
         normalize=True,
-        band_stats=None,                        # None or {band:(mean,std)} or {(t,b):(mean,std)}
+        band_stats=None,                        # None, 'auto', {band:(mean,std)}, or {(t,b):(mean,std)}
+        meta_dir: str | None = None,            # Path to meta directory containing <year>_<month>.npz files
         require_complete=True,                  # only keep tiles with ALL months present
         # band & size handling
         target_bands: int | None = None,        # None => probe few files to detect modal count
@@ -62,9 +130,30 @@ class WheatTilesDataset(Dataset):
         self.months = tuple(month_order)
         self.temporal_layout = temporal_layout
         self.normalize = normalize
-        self.band_stats = band_stats
         self.require_complete = require_complete
         self.size_policy = size_policy
+        
+        # Load meta statistics if provided
+        self.meta_stats = None
+        if meta_dir is not None:
+            meta_path = Path(meta_dir)
+            if meta_path.exists():
+                self.meta_stats = load_meta_stats(meta_path, self.year, self.months)
+                if self.meta_stats:
+                    print(f"[INFO] Loaded meta stats for {len(self.meta_stats)} months from {meta_path}")
+            else:
+                print(f"[WARN] meta_dir specified but not found: {meta_path}")
+        
+        # Handle band_stats: 'auto' uses meta_stats if available
+        if band_stats == 'auto':
+            if self.meta_stats:
+                self.band_stats = 'meta'  # marker to use self.meta_stats in _normalize
+                print("[INFO] Using 'auto' normalization with meta statistics")
+            else:
+                self.band_stats = None
+                print("[WARN] band_stats='auto' but no meta_stats loaded, using per-tile min-max")
+        else:
+            self.band_stats = band_stats
 
         # Regions (filenames only)
         all_regions = sorted([p.name for p in self.DATA.iterdir() if p.is_dir()])
@@ -186,6 +275,21 @@ class WheatTilesDataset(Dataset):
     def _normalize(self, arrTBHW):
         T, B, H, W = arrTBHW.shape
         out = arrTBHW.copy()
+        
+        # Use meta statistics (per-month normalization)
+        if self.band_stats == 'meta' and self.meta_stats:
+            for t, month in enumerate(self.months):
+                if month not in self.meta_stats:
+                    continue  # skip months without stats
+                mean = self.meta_stats[month]['mean']
+                std = self.meta_stats[month]['std']
+                # Ensure we don't exceed available bands
+                num_bands_to_norm = min(B, len(mean))
+                for b in range(num_bands_to_norm):
+                    s = std[b] if std[b] > 0 else 1.0
+                    out[t, b] = (out[t, b] - mean[b]) / s
+            return out
+        
         if self.band_stats is None:
             # per-tile min-max per band across time
             for b in range(B):
@@ -194,6 +298,7 @@ class WheatTilesDataset(Dataset):
                 vmax = np.nanmax(band)
                 out[:, b] = 0.0 if vmax <= vmin else (band - vmin) / (vmax - vmin)
             return out
+        
         keyed_tb = any(isinstance(k, tuple) and len(k) == 2 for k in self.band_stats.keys())
         if keyed_tb:
             for t in range(T):
