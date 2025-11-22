@@ -9,14 +9,14 @@ import time
 from uuid import uuid4
 
 from .config import MODELS_PATH, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm
-from server.train import train_histgb, train_rf_baseline, train_svm_baseline, train_xgboost
-from server.train.pixel_train import train_pixel_model
+from server.train.sklearn_train import TrainConfig, train_sklearn_model
 
 app = FastAPI(title="Wheat Mapping API")
 
 
 def _dataset_kwargs(cfg: TileDatasetConfig) -> dict[str, Any]:
-    return {
+    """Extract dataset kwargs from TileDatasetConfig."""
+    kwargs = {
         "root": cfg.root,
         "year": cfg.year,
         "regions": cfg.regions,
@@ -27,6 +27,11 @@ def _dataset_kwargs(cfg: TileDatasetConfig) -> dict[str, Any]:
         "balance_pixels": cfg.balance_pixels,
         "seed": cfg.seed,
     }
+    # Add meta stats support (TrainConfig expects use_meta_stats and meta_dir, not band_stats)
+    if cfg.use_meta_stats:
+        kwargs["use_meta_stats"] = True
+        kwargs["meta_dir"] = cfg.meta_dir or "./meta"
+    return kwargs
 
 
 def _resolve_save_path(req: TileTrainRequest) -> str | None:
@@ -38,92 +43,31 @@ def _resolve_save_path(req: TileTrainRequest) -> str | None:
     return str((MODELS_PATH / default_name).resolve())
 
 
-def _run_svm_job(req: TileTrainRequest) -> dict[str, Any]:
-    params = {"svm_kernel": "rbf", "svm_C": 1.0, "svm_gamma": "scale"}
-    params.update(req.model_params or {})
-    gamma_raw = params.get("svm_gamma", "scale")
-    try:
-        gamma_val: str | float = float(gamma_raw)
-    except (TypeError, ValueError):
-        gamma_val = str(gamma_raw)
-    cfg = train_svm_baseline.Config(
-        **_dataset_kwargs(req.dataset),
-        svm_kernel=str(params.get("svm_kernel", "rbf")),
-        svm_C=float(params.get("svm_C", 1.0)),
-        svm_gamma=gamma_val,
-        save_model=_resolve_save_path(req),
-    )
-    return train_svm_baseline.train_and_eval(cfg)
-
-
-def _run_rf_job(req: TileTrainRequest) -> dict[str, Any]:
-    params = {"rf_estimators": 200, "rf_max_depth": None}
-    params.update(req.model_params or {})
-    depth = params.get("rf_max_depth", None)
-    cfg = train_rf_baseline.Config(
-        **_dataset_kwargs(req.dataset),
-        rf_estimators=int(params.get("rf_estimators", 200)),
-        rf_max_depth=None if depth in (None, 0, "0", "None") else int(depth),
-        save_model=_resolve_save_path(req),
-    )
-    return train_rf_baseline.train_and_eval(cfg)
-
-
-def _run_histgb_job(req: TileTrainRequest) -> dict[str, Any]:
-    params = {
-        "max_depth": 8,
-        "max_iter": 400,
-        "learning_rate": 0.05,
-        "l2_regularization": 0.0,
+def _run_training_job(req: TileTrainRequest) -> dict[str, Any]:
+    """Unified training job runner using consolidated sklearn_train module."""
+    # Map API algorithm to TrainConfig model_type
+    model_type_map = {
+        TrainingAlgorithm.SVM: "svm",
+        TrainingAlgorithm.RANDOM_FOREST: "random_forest",
+        TrainingAlgorithm.HISTOGRAM_GB: "hist_gradient_boosting",
+        TrainingAlgorithm.XGBOOST: "xgboost",
     }
-    params.update(req.model_params or {})
-    depth = params.get("max_depth", 8)
-    cfg = train_histgb.Config(
+    
+    # Build base config
+    cfg = TrainConfig(
+        model_type=model_type_map[req.algorithm],
         **_dataset_kwargs(req.dataset),
-        max_depth=None if depth in (None, 0, "0", "None") else int(depth),
-        max_iter=int(params.get("max_iter", 400)),
-        learning_rate=float(params.get("learning_rate", 0.05)),
-        l2_regularization=float(params.get("l2_regularization", 0.0)),
         save_model=_resolve_save_path(req),
     )
-    return train_histgb.train_and_eval(cfg)
-
-
-def _run_xgb_job(req: TileTrainRequest) -> dict[str, Any]:
-    params = {
-        "n_estimators": 400,
-        "max_depth": 8,
-        "learning_rate": 0.05,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-    }
-    params.update(req.model_params or {})
-    cfg = train_xgboost.Config(
-        **_dataset_kwargs(req.dataset),
-        n_estimators=int(params.get("n_estimators", 400)),
-        max_depth=int(params.get("max_depth", 8)),
-        learning_rate=float(params.get("learning_rate", 0.05)),
-        subsample=float(params.get("subsample", 0.8)),
-        colsample_bytree=float(params.get("colsample_bytree", 0.8)),
-        save_model=_resolve_save_path(req),
-    )
-    return train_xgboost.train_and_eval(cfg)
-
-
-TRAINING_RUNNERS: Dict[TrainingAlgorithm, Callable[[TileTrainRequest], dict[str, Any]]] = {
-    TrainingAlgorithm.SVM: _run_svm_job,
-    TrainingAlgorithm.RANDOM_FOREST: _run_rf_job,
-    TrainingAlgorithm.HISTOGRAM_GB: _run_histgb_job,
-    TrainingAlgorithm.XGBOOST: _run_xgb_job,
-}
-
-
-def _run_tile_training(req: TileTrainRequest) -> dict[str, Any]:
-    runner = TRAINING_RUNNERS.get(req.algorithm)
-    if runner is None:
-        raise ValueError(f"Unsupported algorithm {req.algorithm}")
-    result = runner(req)
-    result.setdefault("status", "completed")
+    
+    # Override hyperparameters from request
+    if req.model_params:
+        for key, value in req.model_params.items():
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+    
+    # Run training
+    result = train_sklearn_model(cfg)
     result["algorithm"] = req.algorithm.value
     result["job_name"] = req.job_name
     return result
@@ -139,11 +83,21 @@ def health() -> Dict[str, str]:
 
 def train_job(job_id: str, payload: dict[str, Any]) -> None:
     try:
+        print(f"\n{'='*60}", flush=True)
+        print(f"[API TRAINING] Starting job {job_id}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+        
         req = TileTrainRequest(**payload)
-        result = _run_tile_training(req)
+        result = _run_training_job(req)
         jobs[job_id].update(result)
         jobs[job_id]["status"] = "completed"
+        
+        print(f"\n{'='*60}", flush=True)
+        print(f"[API TRAINING] Job {job_id} completed!", flush=True)
+        print(f"  F1: {result.get('f1', 0):.4f}, IoU: {result.get('iou', 0):.4f}", flush=True)
+        print(f"{'='*60}\n", flush=True)
     except Exception as exc:  # pragma: no cover - surfaced via API
+        print(f"\n[API TRAINING] Job {job_id} FAILED: {exc}\n", flush=True)
         jobs[job_id].update({"status": "failed", "error": str(exc)})
 
 

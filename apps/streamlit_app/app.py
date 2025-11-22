@@ -28,7 +28,7 @@ from rasterio.warp import transform_bounds
 project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
-from wheat_segmenter import WheatTilesDataset
+from server.dataset.PatchDataset import WheatTilesDataset
 
 DEFAULT_DATA_ROOT = Path(os.environ.get("DATA_ROOT", r"C:\Users\Administrator\Desktop\preprocessed_data"))
 
@@ -431,13 +431,66 @@ def main_streamlit(app_cfg: AppConfig) -> None:
     You cannot analyze areas outside these tiles!
     """)
 
-    with st.expander("🧠 Training Jobs (API)", expanded=False):
+    # Auto-expand if there's job status
+    has_status = st.session_state.get("train_job_status") is not None
+    with st.expander("🧠 Training Jobs (API)", expanded=has_status):
         job_id = st.session_state.get("train_job_id")
         job_status = st.session_state.get("train_job_status")
         if job_id:
             st.markdown(f"**Current job ID:** `{job_id}`")
             if job_status:
-                st.json(job_status)
+                status = job_status.get("status", "unknown")
+                
+                # Display status prominently
+                if status == "completed":
+                    st.success("✅ Training completed!")
+                    
+                    # Show key metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("F1 Score", f"{job_status.get('f1', 0):.4f}")
+                    with col2:
+                        st.metric("IoU", f"{job_status.get('iou', 0):.4f}")
+                    with col3:
+                        st.metric("Precision", f"{job_status.get('precision', 0):.4f}")
+                    with col4:
+                        st.metric("Recall", f"{job_status.get('recall', 0):.4f}")
+                    
+                    # Show additional details
+                    with st.expander("📊 Full Results", expanded=False):
+                        st.json(job_status)
+                        
+                elif status == "running":
+                    st.info("⏳ Training in progress... Click 'Refresh Job Status' to update.")
+                    # Add auto-refresh button for convenience
+                    if st.button("🔄 Auto-refresh every 10s", key="auto_refresh_btn"):
+                        st.session_state["auto_refresh"] = True
+                        st.rerun()
+                    
+                    # Auto-refresh logic
+                    if st.session_state.get("auto_refresh"):
+                        with st.spinner("Auto-refreshing..."):
+                            time.sleep(10)
+                            try:
+                                resp = requests.get(
+                                    f"{api_url.rstrip('/')}/train/status",
+                                    params={"id": job_id},
+                                    timeout=10,
+                                )
+                                resp.raise_for_status()
+                                updated_status = resp.json()
+                                st.session_state["train_job_status"] = updated_status
+                                if updated_status.get("status") != "running":
+                                    st.session_state["auto_refresh"] = False
+                                st.rerun()
+                            except Exception:
+                                pass
+                elif status == "failed":
+                    st.error(f"❌ Training failed: {job_status.get('error', 'Unknown error')}")
+                    st.json(job_status)
+                else:
+                    st.warning(f"Status: {status}")
+                    st.json(job_status)
             else:
                 st.info("No job status yet. Use the sidebar to refresh.")
         else:
@@ -512,6 +565,10 @@ def main_streamlit(app_cfg: AppConfig) -> None:
     )
     pixels_per_tile = st.sidebar.number_input("Pixels per tile", min_value=256, value=4096, step=512)
     balance_pixels = st.sidebar.checkbox("Balance sampled pixels", value=False)
+    use_meta_stats = st.sidebar.checkbox("Use meta stats normalization", value=True, 
+                                         help="Enable per-month z-score normalization using precomputed statistics")
+    meta_dir = st.sidebar.text_input("Meta stats directory", value="./meta", 
+                                     help="Path to folder containing .npz normalization files")
     seed = st.sidebar.number_input("Random seed", min_value=0, value=42, step=1)
     save_model = st.sidebar.checkbox("Save trained model", value=True)
     output_path = st.sidebar.text_input("Save path override (optional)", value="")
@@ -590,6 +647,11 @@ def main_streamlit(app_cfg: AppConfig) -> None:
                 "balance_pixels": bool(balance_pixels),
                 "seed": int(seed),
             }
+            
+            # Add meta stats only if enabled
+            if use_meta_stats:
+                dataset_cfg["use_meta_stats"] = True
+                dataset_cfg["meta_dir"] = meta_dir.strip() or "./meta"
             payload = {
                 "job_name": job_name.strip() or f"streamlit_job_{int(time.time())}",
                 "algorithm": algorithm,

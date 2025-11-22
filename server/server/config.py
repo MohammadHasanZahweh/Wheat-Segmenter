@@ -75,6 +75,8 @@ class TileDatasetConfig(BaseModel):
     pixels_per_tile: int = 4096
     balance_pixels: bool = False
     seed: int = 42
+    use_meta_stats: bool = False
+    meta_dir: Optional[str] = None
 
 
 class TileTrainRequest(BaseModel):
