@@ -8,9 +8,10 @@ from typing import Any, Optional, Dict, List
 from pydantic import BaseModel, Field
 
 
-DATA_PATH   = Path(os.getenv("DATA_PATH", r"D:\image_lebanon\Lebanon\blbk_dataset\Requested_Tiffs_lcc"))
+DATA_PATH   = Path(os.getenv("DATA_PATH", r"./data/Requested_Tiffs_lcc"))
 MODELS_PATH = Path(os.getenv("RUNS_PATH", r"./runs"))
-PROCESS_DATA_PATH       = Path(os.getenv("PROCESSED_DATA_PATH", r"./processed_data/"))
+os.makedirs(MODELS_PATH, exist_ok=True)
+PROCESS_DATA_PATH       = Path(os.getenv("PROCESSED_DATA_PATH", r"./data/processed_data/"))
 PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data"
 
 
@@ -18,10 +19,10 @@ PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data"
 # ENUM FOR MODEL TYPES
 # ---------------------------
 class ModelType(Enum):
-    ONNX = "onnx_model"
+    ONNX    = "onnx_model"
     SKLEARN = "sklearn_pipeline"
     XGBOOST = "xgboost_model"
-    TORCH = "torch_model"   # currently not implemented
+    TORCH   = "torch_model"   # currently not implemented
 
 
 # ---------------------------

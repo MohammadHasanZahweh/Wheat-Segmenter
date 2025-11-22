@@ -8,6 +8,7 @@ from server.config import DATA_PATH
 months = [11,12,1,2,3,4,5,6,7,]
 years = [2020,]
 aois = [0,1,2,3,4]
+
 def get_file_name(base_path, year, month, aoi):
     """
     Returns a list of file paths (9 GeoTIFFs with 13 bands each)

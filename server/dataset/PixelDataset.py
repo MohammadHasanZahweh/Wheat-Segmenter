@@ -18,8 +18,8 @@ class PixelRangeNPYDataset(Dataset):
         self.transform = transform
         self.samples = []  # (path, class_idx)
 
-        class_names = sorted(os.listdir(root))
-        for class_idx, cname in enumerate(class_names):
+        self.class_names = sorted(os.listdir(root))
+        for class_idx, cname in enumerate(self.class_names):
             cpath = os.path.join(root, cname)
             if not os.path.isdir(cpath):
                 continue

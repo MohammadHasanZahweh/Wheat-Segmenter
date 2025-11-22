@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .config import MODELS_PATH, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm
 from server.train import train_histgb, train_rf_baseline, train_svm_baseline, train_xgboost
+from server.train.pixel_train import train_pixel_model
 
 app = FastAPI(title="Wheat Mapping API")
 
@@ -155,7 +156,7 @@ def start_train(req: TileTrainRequest):
         "algorithm": req.algorithm.value,
         "submitted_at": time.time(),
     }
-    payload = req.dict()
+    payload = req.model_dump()
     thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
     thread.start()
     return {"job_id": job_id, "status": "running"}
@@ -165,6 +166,20 @@ def start_train(req: TileTrainRequest):
 def train_status(id: str):
     return jobs.get(id, {"status": "unknown"})
 
+
+# @app.post("/train")
+# def start_train(req: TileTrainRequest):
+#     job_id = f"job_{uuid4().hex}"
+#     jobs[job_id] = {
+#         "status": "running",
+#         "job_name": req.job_name,
+#         "algorithm": req.algorithm.value,
+#         "submitted_at": time.time(),
+#     }
+#     payload = req.model_dump()
+#     thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
+#     thread.start()
+#     return {"job_id": job_id, "status": "running"}
 
 # jobs: dict[str, dict] = {}
 

@@ -15,5 +15,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app
 
 EXPOSE 8000 8501
-CMD bash -lc "uvicorn src.api.server:app --host 0.0.0.0 --port 8000 & streamlit run app/Main.py --server.port 8501 --server.address 0.0.0.0"
+CMD bash -lc "uvicorn server.api.server:app --host 0.0.0.0 --port 8000 & streamlit run app/Main.py --server.port 8501 --server.address 0.0.0.0"
 
