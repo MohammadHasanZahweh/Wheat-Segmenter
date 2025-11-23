@@ -3,7 +3,7 @@ import rasterio
 from rasterio.windows import Window
 from typing import Callable, List
 import os
-from server.config import DATA_PATH
+from server.server.config import DATA_PATH
 
 months = [11,12,1,2,3,4,5,6,7,]
 years = [2020,]
