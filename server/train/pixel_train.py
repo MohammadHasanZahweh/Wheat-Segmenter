@@ -38,7 +38,7 @@ def train_pixel_model(req: PixelTrainRequest) -> Dict[str, Any]:
         model = SklearnModel(req.sub_model_type)
     
     elif req.model_type == ModelType.TORCH:
-        model = TorchPixelPatchModel(train_ds.class_names)
+        model = TorchPixelPatchModel(train_ds.class_names, mean=train_ds.mean, std=train_ds.std)
     
     else:
         raise NotImplementedError(f"Model type {req.model_type} not supported yet.")

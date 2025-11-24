@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from .base_model import AbstractModel
 from torch import optim
-from pathlib import Path
+
 
 class TorchPixelPatchModel(AbstractModel):
     """
@@ -13,14 +13,12 @@ class TorchPixelPatchModel(AbstractModel):
     pixel and patch predictions.
     """
 
-    def __init__(self, classes, hidden_dims = [64,32], lr=1e-3, device=None, mean = np.array([0]), std = np.array([1])):
+    def __init__(self, classes, hidden_dims = [64,32], lr=1e-3, device=None):
         self.num_classes = int(len(classes))
         self.classes = classes
         self.lr = lr
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.hidden_dims = hidden_dims
-        self.mean = mean
-        self.std = std
 
         input_dim = 9 * 13  # each feature is a 9x13 patch that we flatten
 
@@ -57,8 +55,6 @@ class TorchPixelPatchModel(AbstractModel):
                 "hidden_dims": self.hidden_dims,
                 "classes": self.classes,
                 "lr": self.lr,
-                "mean": self.mean.tolist(),
-                "std": self.std.tolist(),
             },
             path,
         )
@@ -71,42 +67,37 @@ class TorchPixelPatchModel(AbstractModel):
             hidden_dims = checkpoint["hidden_dims"],
             lr=checkpoint.get("lr", 1e-3),
             device=device,
-            mean = np.array(checkpoint.get("mean", [0])),
-            std = np.array(checkpoint.get("std", [1])),
         )
         model.net.load_state_dict(checkpoint["state_dict"])
         return model
 
     # ---------- Inference: pixel ----------
 
-    # def predict_pixel(self, array: np.ndarray, normalize = False) -> np.ndarray:
-    #     """
-    #     array: shape (N, 9, 13)
-    #     returns: shape (N,) integer labels
-    #     """
-    #     self.net.eval()
+    def predict_pixel(self, array: np.ndarray) -> np.ndarray:
+        """
+        array: shape (N, 9, 13)
+        returns: shape (N,) integer labels
+        """
+        self.net.eval()
 
-    #     x = torch.from_numpy(array).float().to(self.device)
-    #     # flatten 9x13 -> 117
-    #     x = x.view(x.shape[0], -1)
+        x = torch.from_numpy(array).float().to(self.device)
+        # flatten 9x13 -> 117
+        x = x.view(x.shape[0], -1)
 
-    #     with torch.no_grad():
-    #         logits = self.net(x)  # (N, num_classes)
-    #         preds = torch.argmax(logits, dim=1)  # (N,)
+        with torch.no_grad():
+            logits = self.net(x)  # (N, num_classes)
+            preds = torch.argmax(logits, dim=1)  # (N,)
 
-    #     return preds.cpu().numpy()
+        return preds.cpu().numpy()
 
    
     # ---------------------------------------------------------------------
     #  ✔ PREDICT PIXEL  (same API as AbstractModel)
     # ---------------------------------------------------------------------
-    def predict_pixel(self, array: np.ndarray, normalize = False):
+    def predict_pixel(self, array: np.ndarray):
         """array shape: (N, 9, 13) -> output shape: (N,)"""
         self.net.eval()
-        if normalize:
-            x = torch.tensor((array - self.mean)/self.std, dtype=torch.float32, device=self.device)
-        else:
-            x = torch.tensor(array, dtype=torch.float32, device=self.device)
+        x = torch.tensor(array, dtype=torch.float32, device=self.device)
         x = x.view(x.shape[0], -1)
 
         with torch.no_grad():
@@ -118,7 +109,7 @@ class TorchPixelPatchModel(AbstractModel):
     # ---------------------------------------------------------------------
     #  ✔ PREDICT PATCH (9×13×H×W → H×W)
     # ---------------------------------------------------------------------
-    def predict_patch(self, array: np.ndarray, normalize = False):
+    def predict_patch(self, array: np.ndarray):
         """
         array: shape (9, 13, H, W)
         output: shape (H, W)
@@ -127,11 +118,7 @@ class TorchPixelPatchModel(AbstractModel):
 
         H, W = array.shape[2], array.shape[3]
 
-        if normalize:
-            x = torch.tensor((array - self.mean.reshape(self.mean.shape[0], self.mean.shape[1],1,1))/self.std.reshape(self.mean.shape[0], self.mean.shape[1],1,1), 
-                            dtype=torch.float32, device=self.device)
-        else:
-            x = torch.tensor(array, dtype=torch.float32, device=self.device)
+        x = torch.tensor(array, dtype=torch.float32, device=self.device)
         x = x.view(9 * 13, H * W).T          # (H*W, 117)
 
         with torch.no_grad():

@@ -5,9 +5,60 @@ from typing import Callable, List
 import os
 from server.server.config import DATA_PATH
 
+import rasterio
+from rasterio.merge import merge
+from functools import partial
+
 months = [11,12,1,2,3,4,5,6,7,]
 years = [2020,]
 aois = [0,1,2,3,4]
+
+def merge_tiffs(tiff_paths, output_path=None):
+    """
+    Merge multiple GeoTIFF files into a single mosaic.
+
+    Parameters
+    ----------
+    tiff_paths : list[str]
+        List of file paths to the input TIFF files.
+    output_path : str or None
+        Path to save the merged TIFF. If None, returns the array + transform.
+
+    Returns
+    -------
+    (mosaic, out_transform) if output_path is None
+    else output_path
+    """
+
+    # 1. Open all TIFFs
+    src_files_to_mosaic = [rasterio.open(fp) for fp in tiff_paths]
+
+    # 2. Merge
+    mosaic, out_transform = merge(src_files_to_mosaic)
+
+    # 3. If no output path, return the data
+    if output_path is None:
+        for src in src_files_to_mosaic:
+            src.close()
+        return mosaic, out_transform
+
+    # 4. Write merged file
+    out_meta = src_files_to_mosaic[0].meta.copy()
+    out_meta.update({
+        "driver": "GTiff",
+        "height": mosaic.shape[1],
+        "width": mosaic.shape[2],
+        "transform": out_transform,
+    })
+
+    with rasterio.open(output_path, "w", **out_meta) as dest:
+        dest.write(mosaic)
+
+    # Close all input files
+    for src in src_files_to_mosaic:
+        src.close()
+
+    return output_path
 
 def get_file_name(base_path, year, month, aoi):
     """
@@ -158,6 +209,22 @@ def run_on_tile_one_year(
     for src in srcs:
         src.close()
     print(f"Saved output to: {out_path}")
+
+
+def run_on_multiple_tiles(
+        year: int,
+        aois: List[int],
+        model,
+        out_path: str,
+        patch_size: int = 256,
+        stride: int = 256,):
+    os.makedirs("temp", exist_ok=True)
+    for aoi in aois:
+        run_on_tile_one_year(year, aoi, partial(model.predict_patch, normalize = True), f"temp/{aoi}.tiff", patch_size, stride)
+    
+    merge_tiffs([f"temp/{aoi}.tiff" for aoi in aois], output_path=out_path)
+    print("merged_successfully")
+    
 
 
 # ----------------------------------------------------------

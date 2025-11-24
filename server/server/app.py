@@ -8,9 +8,9 @@ import threading
 import time
 from uuid import uuid4
 
-from .config import MODELS_PATH, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm
+from .config import MODELS_PATH, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest
 from server.train.sklearn_train import TrainConfig, train_sklearn_model
-
+from server.inference.tile_inference import run_on_tile_one_year
 app = FastAPI(title="Wheat Mapping API")
 
 
@@ -119,6 +119,25 @@ def start_train(req: TileTrainRequest):
 @app.get("/train/status")
 def train_status(id: str):
     return jobs.get(id, {"status": "unknown"})
+
+@app.post("/inference")
+def start_train(req: YearInferenceRequest):
+    job_id = f"job_{uuid4().hex}"
+    
+    try:
+        from server.model.torch_pixel_model import TorchPixelPatchModel
+        model = TorchPixelPatchModel.load(req.model_path)
+    except:
+         return {"job_id": job_id, "status": "failed", "reason":"Unable to load model"}
+    jobs[job_id] = {
+        "status": "running",
+        "job_name": req.job_name,
+        "submitted_at": time.time(),
+    }
+    payload = req.model_dump()
+    thread = threading.Thread(target=infere, args=(job_id, payload), daemon=True)
+    thread.start()
+    return {"job_id": job_id, "status": "running"}
 
 
 # @app.post("/train")

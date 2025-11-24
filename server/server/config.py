@@ -90,3 +90,14 @@ class TileTrainRequest(BaseModel):
     save_model: bool = True
     output_path: Optional[str] = None
     model_params: Optional[Dict[str, Any]] = None
+
+class YearInferenceRequest(BaseModel):
+    """
+    Request payload for API-triggered year jobs.
+    """
+
+    job_name: str
+    model_path : str
+    year:int
+    # dataset: TileDatasetConfig
+
