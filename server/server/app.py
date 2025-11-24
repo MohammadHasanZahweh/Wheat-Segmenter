@@ -110,7 +110,8 @@ def start_train(req: TileTrainRequest):
         "algorithm": req.algorithm.value,
         "submitted_at": time.time(),
     }
-    payload = req.model_dump()
+    # Pydantic v1 uses dict(), v2 uses model_dump()
+    payload = req.dict() if hasattr(req, 'dict') else req.model_dump()
     thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
     thread.start()
     return {"job_id": job_id, "status": "running"}
