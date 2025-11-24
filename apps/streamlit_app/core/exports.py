@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from datetime import datetime
@@ -10,11 +10,7 @@ from apps.streamlit_app.core.geo import bounds_to_polygon
 from apps.streamlit_app.core.metrics import summary_stats
 
 
-def export_geojson(
-    cover_rows: List[Dict[str, Any]],
-    tiles_idx: List[Dict[str, Any]],
-) -> str:
-    """Export results as GeoJSON FeatureCollection."""
+def export_geojson(cover_rows: List[Dict[str, Any]], tiles_idx: List[Dict[str, Any]]) -> str:
     features = []
     for row in cover_rows:
         rec = tiles_idx[row["tile_index"]]
@@ -124,22 +120,22 @@ def summary_report_md(
 
 ## Overview
 - **Total Tiles Analyzed:** {len(cover_rows)}
-- **Average Coverage:** {stats_all["mean"]:.2%}
-- **Coverage Range:** {stats_all["min"]:.2%} – {stats_all["max"]:.2%}
+- **Average Coverage:** {stats_all['mean']:.2%}
+- **Coverage Range:** {stats_all['min']:.2%} – {stats_all['max']:.2%}
 - **High Coverage Tiles (>50%):** {high_cov_count_filtered} ({high_percentage:.1f}%)
 
 ## Verification (micro)
-- **Ground Truth Avg Coverage:** {fmt_pct(verification.get("avg_gt"))}
-- **Avg Delta (Pred - GT):** {fmt_delta(verification.get("avg_delta"))}
-- **Precision / Recall:** {fmt_pct(verification.get("precision"))} / {fmt_pct(verification.get("recall"))}
-- **IoU:** {fmt_pct(verification.get("iou"))}
-- **F1:** {fmt_pct(verification.get("f1"))}
+- **Ground Truth Avg Coverage:** {fmt_pct(verification.get('avg_gt'))}
+- **Avg Delta (Pred - GT):** {fmt_delta(verification.get('avg_delta'))}
+- **Precision / Recall:** {fmt_pct(verification.get('precision'))} / {fmt_pct(verification.get('recall'))}
+- **IoU:** {fmt_pct(verification.get('iou'))}
+- **F1:** {fmt_pct(verification.get('f1'))}
 
 ## Statistics
-- **Median:** {stats_all["median"]:.2%}
-- **Std Dev:** {stats_all["std"]:.2%}
-- **Q1 (25th percentile):** {stats_all["q25"]:.2%}
-- **Q3 (75th percentile):** {stats_all["q75"]:.2%}
+- **Median:** {stats_all['median']:.2%}
+- **Std Dev:** {stats_all['std']:.2%}
+- **Q1 (25th percentile):** {stats_all['q25']:.2%}
+- **Q3 (75th percentile):** {stats_all['q75']:.2%}
 
 ## Regions Covered (after filters)
 {regions_md}

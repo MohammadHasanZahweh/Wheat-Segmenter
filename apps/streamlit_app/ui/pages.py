@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import time
@@ -38,7 +38,6 @@ def render_training_jobs(api_url: str):
 
                 if status == "completed":
                     st.success("✅ Training completed!")
-
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.metric("F1 Score", f"{job_status.get('f1', 0):.4f}")
@@ -48,16 +47,13 @@ def render_training_jobs(api_url: str):
                         st.metric("Precision", f"{job_status.get('precision', 0):.4f}")
                     with col4:
                         st.metric("Recall", f"{job_status.get('recall', 0):.4f}")
-
                     with st.expander("📊 Full Results", expanded=False):
                         st.json(job_status)
-
                 elif status == "running":
                     st.info("⏳ Training in progress... Click 'Refresh Job Status' to update.")
                     if st.button("🔄 Auto-refresh every 10s", key="auto_refresh_btn"):
                         st.session_state["auto_refresh"] = True
                         st.rerun()
-
                     if st.session_state.get("auto_refresh"):
                         with st.spinner("Auto-refreshing..."):
                             time.sleep(10)
@@ -92,7 +88,7 @@ def render_welcome(app_cfg):
         """
         ### Welcome to the wheat segmentation dashboard
 
-        This tool uses **satellite imagery** and **machine learning models**  
+        This tool uses **satellite imagery** and **machine learning models**  \
         to estimate how much of a selected area is covered by wheat.
 
         #### What you can do here
@@ -103,50 +99,100 @@ def render_welcome(app_cfg):
         - Analyze distributions, compare regions, and export results.
 
         #### Workflow
-        1. Open **2️⃣ Configure & Select Region** in the sidebar.  
-        2. Choose the dataset root, year and model, then draw your polygon/rectangle.  
+        1. Open **2️⃣ Configure & Select Region** in the sidebar.  \
+        2. Choose the dataset root, year and model, then draw your polygon/rectangle.  \
         3. Run inference, then switch to **3️⃣ Results & Analysis** to explore charts and exports.
         """,
         unsafe_allow_html=True,
     )
-
     st.info(
-        "ℹ️ The app expects preprocessed data under **`data/` and `label/`** "
-        "inside your root folder, with `{year}/{region}/{month}` hierarchies."
+        "ℹ️ The app expects preprocessed data under **`data/` and `label/`** inside your root folder, with `{year}/{region}/{month}` hierarchies."
     )
 
 
-def render_config_select(sidebar_cfg, model, ds, tiles_idx):
-    st.subheader("📍 Step 2 – Select Region")
+def render_instructions():
+    st.markdown(
+        """
+        ## Instructions
+        1. Load dataset and model using the sidebar → Click **"🔄 Load Dataset & Model"**  
+        2. **IMPORTANT:** You can only analyze regions where data tiles exist (visible rectangles on map)  
+        3. Draw a polygon/rectangle/hexagon **over the visible tile boundaries**  
+        4. Click **Run inference** to see wheat coverage predictions  
+        5. Results persist – scroll down to see colored map, table, and statistics  
 
-    # Base map
+        ⚠️ **Data Coverage:** The rectangles on the map show where your satellite data exists.  
+        You cannot analyze areas outside these tiles!
+        """
+    )
+
+
+def render_settings():
+    defaults = st.session_state.get(
+        "settings",
+        {
+            "model_path": "runs/xgb_2020.joblib",
+            "prob_th": 0.5,
+            "pixels_cap": 2000,
+            "root": "",
+            "year": "2020",
+            "months_text": "11 12 1 2 3 4 5 6 7",
+            "use_meta_stats": True,
+            "meta_dir": "./meta",
+        },
+    )
+    st.subheader("⚙️ Settings")
+    model_path = st.text_input("Model .joblib path", value=defaults["model_path"])
+    prob_th = st.slider("Probability threshold", 0.0, 1.0, float(defaults["prob_th"]), 0.05)
+    pixels_cap = st.number_input("Pixels cap per tile (0 = all)", min_value=0, value=int(defaults["pixels_cap"]), step=500)
+
+    st.markdown("---")
+    root = st.text_input("Root (contains data/ and label/)", value=defaults["root"], help="Example: C:/Users/user/Desktop/preprocessed_data")
+    year = st.text_input("Year", value=defaults["year"])
+    months_text = st.text_input("Months (space-separated)", value=defaults["months_text"])
+
+    use_meta_stats = st.checkbox("Use meta stats normalization", value=bool(defaults.get("use_meta_stats", True)))
+    meta_dir = st.text_input("Meta stats directory", value=defaults.get("meta_dir", "./meta"))
+
+    if st.button("Save Settings", type="primary"):
+        st.session_state["settings"] = {
+            "model_path": model_path,
+            "prob_th": prob_th,
+            "pixels_cap": int(pixels_cap),
+            "root": root,
+            "year": year,
+            "months_text": months_text,
+            "use_meta_stats": use_meta_stats,
+            "meta_dir": meta_dir,
+        }
+        st.success("Settings saved. Use Load Dataset & Model from the sidebar to apply.")
+
+
+def render_config_select(sidebar_cfg, model, ds, tiles_idx):
+    if "cancel_inference" not in st.session_state:
+        st.session_state["cancel_inference"] = False
+
+    st.subheader("📍 Step 2 – Select Region")
     m = folium.Map(
         location=[33.9, 35.9],
         zoom_start=8,
         control_scale=True,
-        tiles="OpenStreetMap",
+        tiles="CartoDB Positron",
         zoom_control=True,
     )
-
     draw = Draw(
         export=False,
         position="topleft",
-        draw_options={
-            "polyline": False,
-            "rectangle": True,
-            "polygon": True,
-            "circle": False,
-            "marker": False,
-            "circlemarker": False,
-        },
+        draw_options={"polyline": False, "rectangle": True, "polygon": True, "circle": False, "marker": False, "circlemarker": False},
         edit_options={"edit": False},
     )
     draw.add_to(m)
 
-    # Draw tile outlines
+    cancel_clicked = st.button("⛔ Cancel inference", use_container_width=True)
+    if cancel_clicked:
+        st.session_state["cancel_inference"] = True
+
     if tiles_idx:
-        tile_count = len(tiles_idx)
-        st.info(f"📍 **{tile_count} data tiles loaded** – draw your shape over these rectangles.")
+        st.info(f"📍 **{len(tiles_idx)} data tiles loaded** – draw your shape over these rectangles.")
         for rec in tiles_idx:
             poly = bounds_to_polygon(rec["bounds"]).exterior.coords[:]
             folium.PolyLine(
@@ -159,40 +205,37 @@ def render_config_select(sidebar_cfg, model, ds, tiles_idx):
     else:
         st.warning("No tile boundaries available – check your dataset root and year.")
 
-    map_output = st_folium(
-        m,
-        width=None,
-        height=500,
-        use_container_width=True,
-        returned_objects=["all_drawings"],
-        key="main_map",
-    )
-
+    map_output = st_folium(m, width=None, height=500, use_container_width=True, returned_objects=["all_drawings"], key="main_map")
     geom = None
     if map_output and map_output.get("all_drawings"):
         drawings = map_output["all_drawings"]
         if drawings:
             geom = shape(drawings[-1]["geometry"])
             st.info(f"✅ Region selected: {drawings[-1]['geometry']['type']}")
+            if tiles_idx:
+                tile_polys = [bounds_to_polygon(r["bounds"]) for r in tiles_idx]
+                selected_tmp = [i for i, p in enumerate(tile_polys) if geom.intersects(p)]
+                for i in selected_tmp:
+                    poly = tile_polys[i].exterior.coords[:]
+                    folium.PolyLine(
+                        locations=[(y, x) for x, y in poly],
+                        color="#FF4444",
+                        weight=3,
+                        opacity=0.9,
+                    ).add_to(m)
 
     st.markdown("---")
     col1, col2 = st.columns([1, 1])
-
     with col1:
-        run_clicked = st.button(
-            "🚀 Run Inference",
-            type="primary",
-            use_container_width=True,
-            disabled=(geom is None),
-        )
-
+        run_clicked = st.button("🚀 Run Inference", type="primary", use_container_width=True, disabled=(geom is None))
     with col2:
         if st.button("🗑️ Clear Results", use_container_width=True):
             for key in ("results_data", "results_selected", "results_tiles_idx"):
                 st.session_state.pop(key, None)
-            st.experimental_rerun()
+            st.rerun()
 
     if run_clicked and geom is not None:
+        st.session_state["cancel_inference"] = False
         if model is None:
             st.error("❌ Please load a model first from the sidebar.")
         elif ds is None:
@@ -212,14 +255,20 @@ def render_config_select(sidebar_cfg, model, ds, tiles_idx):
                 st.session_state["results_tiles_idx"] = tiles_idx
 
 
-def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
+def render_results(sidebar_cfg, cover_rows, tiles_idx, year):
     st.subheader("🗺️ Step 3 – Results & Analysis")
+    st.caption(
+        f"Inference settings → Probability threshold: {sidebar_cfg.prob_th:.2f} | Pixels cap per tile: "
+        f"{sidebar_cfg.pixels_cap if sidebar_cfg.pixels_cap else 'all'}"
+    )
+
+    if sidebar_cfg.use_meta_stats:
+        pass
 
     # Filters
     st.subheader("🔍 Filters")
     all_regions = sorted({r["region"] for r in cover_rows})
     col_f1, col_f2, col_f3 = st.columns([2, 2, 1])
-
     with col_f1:
         selected_regions = st.multiselect(
             "Regions",
@@ -227,7 +276,6 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
             default=all_regions,
             help="Filter results to specific regions.",
         )
-
     with col_f2:
         cov_min, cov_max = st.slider(
             "Coverage range",
@@ -237,24 +285,18 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
             step=0.05,
             help="Only keep tiles whose predicted coverage lies in this range.",
         )
-
     with col_f3:
-        apply_filter_to_map = st.checkbox(
-            "Filter map", value=False, help="Apply filters to the map as well."
-        )
+        apply_filter_to_map = st.checkbox("Filter map", value=False, help="Apply filters to the map as well.")
 
     filtered_rows = [
-        r
-        for r in cover_rows
-        if r["region"] in selected_regions and cov_min <= r["coverage_pred"] <= cov_max
+        r for r in cover_rows if r["region"] in selected_regions and cov_min <= r["coverage_pred"] <= cov_max
     ]
-
     if not filtered_rows:
         st.warning("Filters removed all tiles – adjust region/coverage filters.")
         filtered_rows = cover_rows
 
-    avg_cov = float(np.mean([r["coverage_pred"] for r in filtered_rows]))
-    max_cov = max([r["coverage_pred"] for r in filtered_rows])
+    avg_cov = float(np.mean([r["coverage_pred"] for r in filtered_rows])) if filtered_rows else 0
+    max_cov = max([r["coverage_pred"] for r in filtered_rows]) if filtered_rows else 0
     high_cov_count = sum(1 for r in filtered_rows if r["coverage_pred"] > 0.5)
     verification_summary = aggregate_verification(filtered_rows)
     fmt_pct = lambda v: f"{v:.2%}" if v is not None else "—"
@@ -262,34 +304,21 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
 
     st.markdown('<div class="metrics-row">', unsafe_allow_html=True)
     mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-    with mcol1:
-        st.metric("Tiles (after filters)", len(filtered_rows))
-    with mcol2:
-        st.metric("Avg Coverage", f"{avg_cov:.2%}")
-    with mcol3:
-        st.metric("Max Coverage", f"{max_cov:.2%}")
-    with mcol4:
-        st.metric("High Coverage Tiles (>50%)", high_cov_count)
+    mcol1.metric("Tiles (after filters)", len(filtered_rows))
+    mcol2.metric("Avg Coverage", f"{avg_cov:.2%}")
+    mcol3.metric("Max Coverage", f"{max_cov:.2%}")
+    mcol4.metric("High Coverage Tiles (>50%)", high_cov_count)
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="metrics-row">', unsafe_allow_html=True)
     vcol1, vcol2, vcol3, vcol4 = st.columns(4)
-    with vcol1:
-        st.metric("Avg GT Coverage", fmt_pct(verification_summary["avg_gt"]))
-    with vcol2:
-        st.metric("Avg Coverage Δ (Pred-GT)", fmt_delta(verification_summary["avg_delta"]))
-    with vcol3:
-        st.metric("IoU (micro)", fmt_pct(verification_summary["iou"]))
-    with vcol4:
-        st.metric(
-            "Precision / Recall",
-            f"{fmt_pct(verification_summary['precision'])} / {fmt_pct(verification_summary['recall'])}",
-        )
+    vcol1.metric("Avg GT Coverage", fmt_pct(verification_summary["avg_gt"]))
+    vcol2.metric("Avg Coverage Δ (Pred-GT)", fmt_delta(verification_summary["avg_delta"]))
+    vcol3.metric("IoU (micro)", fmt_pct(verification_summary["iou"]))
+    vcol4.metric("Precision / Recall", f"{fmt_pct(verification_summary['precision'])} / {fmt_pct(verification_summary['recall'])}")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["🗺️ Map", "📊 Analytics", "📋 Data", "📈 Statistics", "💾 Export"]
-    )
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Map", "📊 Analytics", "📋 Data", "📈 Statistics", "💾 Export"])
 
     # TAB 1: MAP
     with tab1:
@@ -297,13 +326,12 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
             location=[33.9, 35.9],
             zoom_start=8,
             control_scale=True,
-            tiles="OpenStreetMap",
+            tiles="CartoDB Positron",
         )
-
         rows_for_map = filtered_rows if apply_filter_to_map else cover_rows
-        idx_for_map = [tiles_idx[r["tile_index"]] for r in rows_for_map]
-
-        for rec, row in zip(idx_for_map, rows_for_map):
+        safe_rows = [r for r in rows_for_map if 0 <= r["tile_index"] < len(tiles_idx)]
+        idx_for_map = [tiles_idx[r["tile_index"]] for r in safe_rows]
+        for rec, row in zip(idx_for_map, safe_rows):
             poly = bounds_to_polygon(rec["bounds"])
             color = cov_color(row["coverage_pred"])
             properties = {
@@ -314,88 +342,42 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
                 "coverage_delta": row.get("coverage_delta"),
                 "n_pixels": row.get("n_pixels"),
             }
-
             folium.GeoJson(
-                data={
-                    "type": "Feature",
-                    "geometry": poly.__geo_interface__,
-                    "properties": properties,
-                },
-                style_function=lambda feat, col=color: {
-                    "fillColor": col,
-                    "color": "#000",
-                    "weight": 1.5,
-                    "fillOpacity": 0.7,
-                },
+                data={"type": "Feature", "geometry": poly.__geo_interface__, "properties": properties},
+                style_function=lambda feat, col=color: {"fillColor": col, "color": "#000", "weight": 1.5, "fillOpacity": 0.7},
                 tooltip=folium.GeoJsonTooltip(
                     fields=["tile_id", "coverage_pred", "coverage_gt", "coverage_delta", "n_pixels"],
                     aliases=["Tile ID", "Wheat Coverage", "GT Coverage", "Delta", "Pixels Sampled"],
                     localize=True,
                 ),
             ).add_to(results_map)
-
         results_map.get_root().html.add_child(folium.Element(legend_html()))
-
-        st_folium(
-            results_map,
-            width=None,
-            height=600,
-            use_container_width=True,
-            key="results_map_display",
-        )
+        st_folium(results_map, width=None, height=600, use_container_width=True, key="results_map_display")
 
     # TAB 2: ANALYTICS
     with tab2:
         col_dist, col_region = st.columns(2)
-
         with col_dist:
-            st.plotly_chart(
-                coverage_distribution_chart(filtered_rows),
-                use_container_width=True,
-            )
-
+            st.plotly_chart(coverage_distribution_chart(filtered_rows), use_container_width=True)
         with col_region:
-            st.plotly_chart(
-                coverage_by_region_chart(filtered_rows),
-                use_container_width=True,
-            )
-
+            st.plotly_chart(coverage_by_region_chart(filtered_rows), use_container_width=True)
         st.markdown("---")
-        st.plotly_chart(
-            tile_ranking_chart(filtered_rows),
-            use_container_width=True,
-        )
+        st.plotly_chart(tile_ranking_chart(filtered_rows), use_container_width=True)
 
     # TAB 3: DATA TABLE
     with tab3:
         st.subheader("📋 Detailed Results (after filters)")
         df = pd.DataFrame(filtered_rows)
         df_display = df.copy()
-        for missing_col in (
-            "coverage_gt",
-            "coverage_delta",
-            "precision",
-            "recall",
-            "iou",
-            "n_valid_total",
-            "sample_rate",
-            "has_gt",
-            "tile_index",
-        ):
+        for missing_col in ("coverage_gt", "coverage_delta", "precision", "recall", "iou", "n_valid_total", "sample_rate", "has_gt", "tile_index"):
             if missing_col not in df_display:
                 df_display[missing_col] = np.nan
         df_display["coverage_pred"] = df_display["coverage_pred"].apply(lambda x: f"{x:.1%}")
-        df_display["coverage_gt"] = df_display["coverage_gt"].apply(
-            lambda x: f"{x:.1%}" if pd.notnull(x) else "—"
-        )
-        df_display["coverage_delta"] = df_display["coverage_delta"].apply(
-            lambda x: f"{x:+.1%}" if pd.notnull(x) else "—"
-        )
+        df_display["coverage_gt"] = df_display["coverage_gt"].apply(lambda x: f"{x:.1%}" if pd.notnull(x) else "—")
+        df_display["coverage_delta"] = df_display["coverage_delta"].apply(lambda x: f"{x:+.1%}" if pd.notnull(x) else "—")
         for col in ("precision", "recall", "iou"):
             df_display[col] = df_display[col].apply(lambda v: f"{v:.1%}" if pd.notnull(v) else "—")
-        df_display["sample_rate"] = df_display["sample_rate"].apply(
-            lambda v: f"{v:.1%}" if pd.notnull(v) else "—"
-        )
+        df_display["sample_rate"] = df_display["sample_rate"].apply(lambda v: f"{v:.1%}" if pd.notnull(v) else "—")
         ordered_cols = [
             "region",
             "tile_id",
@@ -419,7 +401,6 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
         stats = summary_stats(filtered_rows)
         gt_values = [r["coverage_gt"] for r in filtered_rows if r.get("coverage_gt") is not None]
         delta_values = [r["coverage_delta"] for r in filtered_rows if r.get("coverage_delta") is not None]
-
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(
@@ -432,7 +413,6 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
                 """.format(**stats),
                 unsafe_allow_html=True,
             )
-
             st.markdown(
                 """
                 <div class="stat-card">
@@ -443,7 +423,6 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
                 """.format(**stats),
                 unsafe_allow_html=True,
             )
-
         with col2:
             st.markdown(
                 """
@@ -455,7 +434,6 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
                 """.format(std=stats["std"], var=stats["std"] ** 2),
                 unsafe_allow_html=True,
             )
-
             st.markdown(
                 """
                 <div class="stat-card">
@@ -475,7 +453,6 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
                 "min": float(np.min(stats_gt_arr)),
                 "max": float(np.max(stats_gt_arr)),
             }
-
             st.markdown("---")
             gcol1, gcol2 = st.columns(2)
             with gcol1:
@@ -490,7 +467,6 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
                     """.format(**stats_gt),
                     unsafe_allow_html=True,
                 )
-
             with gcol2:
                 ver = verification_summary
                 st.markdown(
@@ -510,7 +486,6 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
                     ),
                     unsafe_allow_html=True,
                 )
-
             if delta_values:
                 delta_avg = float(np.mean(delta_values))
                 st.info(f"Average coverage delta (pred - GT): {fmt_delta(delta_avg)}")
@@ -523,37 +498,15 @@ def render_results(sidebar_cfg, cover_rows, tiles_idx, year, selected):
         csv_data, csv_name = export_csv(filtered_rows, year)
         geojson_data = export_geojson(filtered_rows, tiles_idx)
         json_data = export_json(filtered_rows, year, verification_summary, filters)
-
         col_csv, col_geojson, col_json = st.columns(3)
         with col_csv:
-            st.download_button(
-                "📥 CSV",
-                data=csv_data,
-                file_name=csv_name,
-                mime="text/csv",
-                use_container_width=True,
-            )
-
+            st.download_button("📥 CSV", data=csv_data, file_name=csv_name, mime="text/csv", use_container_width=True)
         with col_geojson:
-            st.download_button(
-                "🗺️ GeoJSON",
-                data=geojson_data,
-                file_name=f"wheat_coverage_{year}.geojson",
-                mime="application/json",
-                use_container_width=True,
-            )
-
+            st.download_button("🗺️ GeoJSON", data=geojson_data, file_name=f"wheat_coverage_{year}.geojson", mime="application/json", use_container_width=True)
         with col_json:
-            st.download_button(
-                "📄 JSON",
-                data=json_data,
-                file_name=f"wheat_coverage_{year}_full.json",
-                mime="application/json",
-                use_container_width=True,
-            )
+            st.download_button("📄 JSON", data=json_data, file_name=f"wheat_coverage_{year}_full.json", mime="application/json", use_container_width=True)
 
         st.markdown("---")
-
         st.subheader("📄 Summary Report (after filters)")
         summary_text = summary_report_md(
             cover_rows=filtered_rows,

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import os
@@ -18,6 +18,8 @@ from apps.streamlit_app.core.api_client import TrainAPI
 from apps.streamlit_app.core.loaders import load_dataset, load_model
 from apps.streamlit_app.ui.pages import (
     render_config_select,
+    render_instructions,
+    render_settings,
     render_results,
     render_training_jobs,
     render_welcome,
@@ -84,26 +86,53 @@ def handle_training_actions(api_url: str, sidebar_cfg: SidebarConfig):
 def main_streamlit(app_cfg: AppConfig) -> None:
     st.set_page_config(page_title="Wheat Map (Lebanon)", layout="wide")
     inject_global_styles()
-    st.title("🌾 Wheat Coverage Map (Lebanon)")
     st.markdown(
         """
-        **Instructions:**
-        1. Load dataset and model using the sidebar → Click "🔄 Load Dataset & Model"
-        2. **IMPORTANT:** You can only analyze regions where data tiles exist (visible rectangles on map)
-        3. Draw a polygon/rectangle/hexagon **over the visible tile boundaries**
-        4. Click **Run inference** to see wheat coverage predictions
-        5. Results persist - scroll down to see colored map, table, and statistics
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <span style="font-size: 32px;">🌾</span>
+            <h1 style="margin:0;">Wheat Coverage Map (Lebanon)</h1>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        ⚠️ **Data Coverage:** The rectangles on the map show where your satellite data exists. 
-        You cannot analyze areas outside these tiles!
+    nav_options = ["Welcome", "Instructions", "Settings", "Configure & Select Region", "Results & Analysis"]
+    if "nav" not in st.session_state:
+        st.session_state["nav"] = nav_options[0]
+
+    st.markdown(
         """
+        <style>
+        .nav-row button[kind=\"secondary\"] {
+            border-radius: 999px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(115,161,255,0.3);
+            color: #e2e8f0;
+        }
+        .nav-row button[kind=\"primary\"] {
+            border-radius: 999px;
+            background: linear-gradient(120deg, #74f1ff, #5ee6a0);
+            color: #0a1526;
+            border: 0;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
-
-    nav = st.sidebar.radio(
-        "Navigation",
-        ["1️⃣ Welcome", "2️⃣ Configure & Select Region", "3️⃣ Results & Analysis"],
-        index=1,
-    )
+    nav_cols = st.columns(len(nav_options), gap="small")
+    with st.container():
+        for col, label in zip(nav_cols, nav_options):
+            with col:
+                active = st.session_state["nav"] == label
+                if st.button(
+                    label,
+                    type="primary" if active else "secondary",
+                    use_container_width=True,
+                    key=f"nav_{label}",
+                ):
+                    st.session_state["nav"] = label
+                    st.rerun()
+    nav = st.session_state["nav"]
 
     sidebar_cfg = render_sidebar(app_cfg)
     handle_training_actions(sidebar_cfg.api_url, sidebar_cfg)
@@ -118,9 +147,9 @@ def main_streamlit(app_cfg: AppConfig) -> None:
         st.session_state["tiles_index"] = tiles_index
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown('<div class="sidebar-title">📊 Status</div>', unsafe_allow_html=True)
-    model_status = "✅ Loaded" if st.session_state.get("model") is not None else "❌ Not loaded"
-    dataset_status = "✅ Loaded" if st.session_state.get("dataset") is not None else "❌ Not loaded"
+    st.sidebar.markdown('<div class="sidebar-title">?? Status</div>', unsafe_allow_html=True)
+    model_status = "? Loaded" if st.session_state.get("model") is not None else "? Not loaded"
+    dataset_status = "? Loaded" if st.session_state.get("dataset") is not None else "? Not loaded"
     tiles_count = len(st.session_state.get("tiles_index", []))
     st.sidebar.markdown(
         f"""
@@ -130,11 +159,16 @@ def main_streamlit(app_cfg: AppConfig) -> None:
         """
     )
 
-    if nav == "1️⃣ Welcome":
+    if nav == "Welcome":
         render_welcome(app_cfg)
         return
-
-    if nav == "2️⃣ Configure & Select Region":
+    if nav == "Instructions":
+        render_instructions()
+        return
+    if nav == "Settings":
+        render_settings()
+        return
+    if nav == "Configure & Select Region":
         render_config_select(
             sidebar_cfg=sidebar_cfg,
             model=st.session_state.get("model"),
@@ -142,18 +176,16 @@ def main_streamlit(app_cfg: AppConfig) -> None:
             tiles_idx=st.session_state.get("tiles_index", []),
         )
         return
-
-    if nav == "3️⃣ Results & Analysis":
+    if nav == "Results & Analysis":
         cover_rows = st.session_state.get("results_data")
         if not cover_rows:
-            st.warning("No results yet. Run inference in **2️⃣ Configure & Select Region** first.")
+            st.warning("No results yet. Run inference in **2?? Configure & Select Region** first.")
             return
         render_results(
             sidebar_cfg=sidebar_cfg,
             cover_rows=cover_rows,
             tiles_idx=st.session_state.get("results_tiles_idx", []),
             year=sidebar_cfg.year,
-            selected=st.session_state.get("results_selected", []),
         )
 
 

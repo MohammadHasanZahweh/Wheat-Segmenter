@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Tuple
@@ -38,33 +38,33 @@ class SidebarConfig:
 def render_sidebar(app_cfg) -> SidebarConfig:
     st.sidebar.header("⚙️ Configuration")
 
-    # Model settings
-    st.sidebar.markdown('<div class="sidebar-title">Model Settings</div>', unsafe_allow_html=True)
-    model_path = st.sidebar.text_input("Model .joblib path", value="runs/xgb_2020.joblib")
-    prob_th = st.sidebar.slider("Probability threshold", 0.0, 1.0, 0.5, 0.05)
-    pixels_cap = st.sidebar.number_input(
-        "Pixels cap per tile (0 = all)", min_value=0, value=2000, step=500
+    # Pull settings from session (set in Settings page)
+    settings = st.session_state.get(
+        "settings",
+        {
+            "model_path": "runs/xgb_2020.joblib",
+            "prob_th": 0.5,
+            "pixels_cap": 2000,
+            "root": app_cfg.root,
+            "year": app_cfg.year,
+            "months_text": " ".join(map(str, app_cfg.months)),
+            "use_meta_stats": True,
+            "meta_dir": "./meta",
+        },
     )
-
-    st.sidebar.markdown("---")
-
-    # Dataset settings
-    st.sidebar.markdown('<div class="sidebar-title">Dataset Settings</div>', unsafe_allow_html=True)
-    root = st.sidebar.text_input(
-        "Root (contains data/ and label/)",
-        value=app_cfg.root,
-        help="Example: C:/Users/user/Desktop/preprocessed_data",
-    )
-    year = st.sidebar.text_input("Year", value=app_cfg.year)
-    months_text = st.sidebar.text_input(
-        "Months (space-separated)", value=" ".join(map(str, app_cfg.months))
-    )
+    model_path = settings.get("model_path", "")
+    prob_th = float(settings.get("prob_th", 0.5))
+    pixels_cap = int(settings.get("pixels_cap", 2000))
+    root = settings.get("root", app_cfg.root)
+    year = settings.get("year", app_cfg.year)
+    months_text = settings.get("months_text", " ".join(map(str, app_cfg.months)))
+    use_meta_stats = bool(settings.get("use_meta_stats", True))
+    meta_dir = settings.get("meta_dir", "./meta")
 
     if months_text.strip():
         try:
             months_sequence = tuple(int(m) for m in months_text.strip().split())
         except ValueError:
-            st.sidebar.error("Invalid months input; falling back to defaults.")
             months_sequence = app_cfg.months
     else:
         months_sequence = app_cfg.months
@@ -98,16 +98,6 @@ def render_sidebar(app_cfg) -> SidebarConfig:
     )
     pixels_per_tile = st.sidebar.number_input("Pixels per tile", min_value=256, value=4096, step=512)
     balance_pixels = st.sidebar.checkbox("Balance sampled pixels", value=False)
-    use_meta_stats = st.sidebar.checkbox(
-        "Use meta stats normalization",
-        value=True,
-        help="Enable per-month z-score normalization using precomputed statistics",
-    )
-    meta_dir = st.sidebar.text_input(
-        "Meta stats directory",
-        value="./meta",
-        help="Path to folder containing .npz normalization files",
-    )
     seed = st.sidebar.number_input("Random seed", min_value=0, value=42, step=1)
     save_model = st.sidebar.checkbox("Save trained model", value=True)
     output_path = st.sidebar.text_input("Save path override (optional)", value="")

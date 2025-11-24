@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -13,7 +13,7 @@ from apps.streamlit_app.core.metrics import calc_pr_metrics
 def _extract_features_all_valid(x_tb_hw: np.ndarray, valid_hw: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Flatten tile into per-pixel feature vectors, keep only valid pixels."""
     T, B, H, W = x_tb_hw.shape
-    flat = x_tb_hw.reshape(T * B, H * W).T  # [H*W, T*B]
+    flat = x_tb_hw.reshape(T * B, H * W).T
     valid_idx = np.flatnonzero((valid_hw > 0.5).reshape(-1))
     return flat[valid_idx].astype(np.float32), valid_idx
 
@@ -26,8 +26,6 @@ def run_inference(
     prob_th: float,
     pixels_cap: Optional[int],
 ) -> Tuple[List[Dict[str, Any]], List[int]]:
-    st.session_state["cancel_inference"] = False
-
     tile_polys = [bounds_to_polygon(r["bounds"]) for r in tiles_idx]
     selected: List[int] = [i for i, poly in enumerate(tile_polys) if geom.intersects(poly)]
 
@@ -37,10 +35,6 @@ def run_inference(
         return [], []
 
     cover_rows: List[Dict[str, Any]] = []
-    cancel_btn = st.button("⛔ Cancel inference")
-    if cancel_btn:
-        st.session_state["cancel_inference"] = True
-        st.stop()
 
     prog = st.progress(0.0, text="Running inference…")
     cap = int(pixels_cap) if pixels_cap and pixels_cap > 0 else None
@@ -53,7 +47,7 @@ def run_inference(
         rec = tiles_idx[idx]
         item = ds[idx]
 
-        x = item["x"].numpy()  # (T,B,H,W)
+        x = item["x"].numpy()
         valid = item["valid_mask"].numpy()[0] > 0.5
         n_valid_total = int(valid.sum())
 
@@ -84,7 +78,6 @@ def run_inference(
             pred = (proba >= prob_th).astype(np.uint8)
             cov = float(pred.mean())
 
-            # Ground-truth verification
             if "wheat_mask" in item:
                 wheat = item["wheat_mask"].numpy()[0] > 0.5
                 gt_flat = wheat.reshape(-1)[valid_idx]
@@ -96,12 +89,7 @@ def run_inference(
                     precision = metrics["precision"]
                     recall = metrics["recall"]
                     iou = metrics["iou"]
-                    tp, fp, fn, tn = (
-                        metrics["tp"],
-                        metrics["fp"],
-                        metrics["fn"],
-                        metrics["tn"],
-                    )
+                    tp, fp, fn, tn = metrics["tp"], metrics["fp"], metrics["fn"], metrics["tn"]
 
         cover_rows.append(
             {
@@ -125,10 +113,7 @@ def run_inference(
                 "sample_rate": (len(flat) / n_valid_total) if n_valid_total > 0 else None,
             }
         )
-        prog.progress(
-            (k + 1) / len(selected),
-            text=f"Processing tile {k + 1}/{len(selected)}",
-        )
+        prog.progress((k + 1) / len(selected), text=f"Processing tile {k + 1}/{len(selected)}")
 
     prog.empty()
     if canceled:

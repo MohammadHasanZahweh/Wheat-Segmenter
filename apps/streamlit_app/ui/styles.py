@@ -102,12 +102,14 @@ def legend_html() -> str:
             bottom: 50px;
             left: 50px;
             width: 220px;
-            background-color: white;
-            border: 1px solid grey;
+            background: rgba(11, 20, 34, 0.9);
+            color: #e2e8f0;
+            border: 1px solid rgba(115,161,255,0.3);
             z-index: 9999;
             font-size: 13px;
             padding: 10px;
-            border-radius: 8px;">
+            border-radius: 8px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.35);">
             <p style="margin:0; font-weight:bold;">🌾 Wheat Coverage Legend</p>
             <p style="margin:5px 0;"><span style="background-color:#00FF00; padding:2px 10px;">■</span> Very High (>70%)</p>
             <p style="margin:5px 0;"><span style="background-color:#7FFF00; padding:2px 10px;">■</span> High (50–70%)</p>
