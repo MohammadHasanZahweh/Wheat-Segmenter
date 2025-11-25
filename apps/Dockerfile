@@ -11,11 +11,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir streamlit
 
-COPY . .
+COPY . ./apps
 
 ENV PYTHONUNBUFFERED=1
 
 # Streamlit runs on port 8501 by default
 EXPOSE 8501
 
-CMD ["streamlit", "run", "streamlit_app/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["streamlit", "run", "apps/streamlit_app/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
