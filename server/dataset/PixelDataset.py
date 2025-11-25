@@ -92,9 +92,9 @@ class PixelFromKNPYDataset(Dataset):
 
 if __name__ == "__main__":
     from pathlib import Path
-    PROCESS_DATA_PATH       = Path(r"./data/processed_data/")
-    PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data/wheat"
-
+    # PROCESS_DATA_PATH       = Path(r"./data/processed_data/")
+    # PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data/wheat"
+    from server.config import PROCESS_DATA_PATH, PIXEL_SPLIT_DATA_PATH
     print(PROCESS_DATA_PATH.exists())
     import os
     print(os.listdir("./"))

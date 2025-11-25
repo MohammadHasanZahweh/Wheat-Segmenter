@@ -1,11 +1,9 @@
-version: "3.9"
-
 services:
   api:
     container_name: wheat_api
     build:
       context: ./server
-      dockerfile: ./server/Dockerfile.gpu
+      dockerfile: Dockerfile.gpu
     ports:
       - "8000:8000"
     volumes:
@@ -21,8 +19,7 @@ services:
   app:
     container_name: wheat_app
     build:
-      context: ../app
-      dockerfile: ./apps/Dockerfile
+      context: ./apps
     ports:
       - "8501:8501"
     # volumes:
@@ -30,9 +27,9 @@ services:
     #   - ../runs:/runs
     #   - ../results:/results
     environment:
-      - DATA_DIR=/data
-      - RUNS_DIR=/runs
-      - RESULTS_DIR=/results
+      # - DATA_DIR=/data
+      # - RUNS_DIR=/runs
+      # - RESULTS_DIR=/results
       - API_URL=http://api:8000
     depends_on:
       - api

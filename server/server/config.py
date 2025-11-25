@@ -8,11 +8,13 @@ from typing import Any, Optional, Dict, List
 from pydantic import BaseModel, Field
 
 
-DATA_PATH   = Path(os.getenv("DATA_PATH", r"./data/Requested_Tiffs_lcc"))
-MODELS_PATH = Path(os.getenv("RUNS_PATH", r"./runs"))
-os.makedirs(MODELS_PATH, exist_ok=True)
-PROCESS_DATA_PATH       = Path(os.getenv("PROCESSED_DATA_PATH", r"./data/processed_data/"))
+DATA_PATH   = Path(os.getenv("DATA_DIR", r"./data/Requested_Tiffs_lcc"))
+DOWNLOAD_DATA_PATH   = DATA_PATH/"Requested_Tiffs_lcc"
+PROCESS_DATA_PATH       = DATA_PATH/"processed_data"
 PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data"
+
+MODELS_PATH = Path(os.getenv("RUNS_DIR", r"./runs"))
+RESULTS_DIR = Path(os.getenv("RESULTS_DIR", r"./results"))
 
 
 # ---------------------------
