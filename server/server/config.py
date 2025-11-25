@@ -8,8 +8,7 @@ from typing import Any, Optional, Dict, List
 from pydantic import BaseModel, Field
 
 
-DATA_PATH   = Path(os.getenv("DATA_DIR", r"./data/Requested_Tiffs_lcc"))
-DOWNLOAD_DATA_PATH   = DATA_PATH/"Requested_Tiffs_lcc"
+DATA_PATH   = Path(os.getenv("DATA_DIR", r"./data"))
 PROCESS_DATA_PATH       = DATA_PATH/"processed_data"
 PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data"
 
@@ -63,11 +62,13 @@ class TrainingAlgorithm(str, Enum):
     RANDOM_FOREST = "random_forest"
     HISTOGRAM_GB = "hist_gradient_boosting"
     XGBOOST = "xgboost"
+    LR = "LogisticRegression"
+
 
 
 class TileDatasetConfig(BaseModel):
-    root: str
-    year: str
+    project_name: str
+    year: int
     regions: Optional[List[str]] = None
     months: List[int] = Field(
         default_factory=lambda: [11, 12, 1, 2, 3, 4, 5, 6, 7]
@@ -77,7 +78,7 @@ class TileDatasetConfig(BaseModel):
     pixels_per_tile: int = 4096
     balance_pixels: bool = False
     seed: int = 42
-    use_meta_stats: bool = False
+    normalize: bool = True
     meta_dir: Optional[str] = None
 
 
@@ -88,19 +89,42 @@ class TileTrainRequest(BaseModel):
 
     job_name: str
     algorithm: TrainingAlgorithm
-    dataset: TileDatasetConfig
+    dataset: TileDatasetConfig | None
     save_model: bool = True
     output_path: Optional[str] = None
+    model_params: Optional[Dict[str, Any]] = None
+
+WHEAT_DATASET = TileDatasetConfig(
+    project_name = "wheat",
+    year=2020,
+    regions = None,
+    months=[11, 12, 1, 2, 3, 4, 5, 6, 7],
+    train_fraction = 0.01,
+    test_fraction = 0.25,
+    balance_pixels = False,
+    seed = 42,
+    normalize=True,
+)
+
+class TrainRequest(BaseModel):
+    """
+    Request payload for API-triggered tile-based training jobs.
+    """
+
+    job_name: str
+    algorithm: TrainingAlgorithm
+    dataset: TileDatasetConfig = WHEAT_DATASET
+    model_name: Optional[str] = None
     model_params: Optional[Dict[str, Any]] = None
 
 class YearInferenceRequest(BaseModel):
     """
     Request payload for API-triggered year jobs.
     """
-
-    job_name: str
-    model_path : str
+    region_name:str
+    project_name: str
+    model_name : str
     year:int
-    save_path:str
+    save_name:str
     # dataset: TileDatasetConfig
 

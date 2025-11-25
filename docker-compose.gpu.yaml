@@ -7,9 +7,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ../data:/data
-      - ../runs:/runs
-      - ../results:/results
+      - ./data:/data
+      - ./runs:/runs
+      - ./results:/results
     environment:
       - DATA_DIR=/data
       - RUNS_DIR=/runs

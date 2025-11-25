@@ -87,17 +87,17 @@ from server.train.sklearn_train import TrainConfig, train_sklearn_model
 # Configure training
 config = TrainConfig(
     model_type="xgboost",
-    root=r"C:\Users\Administrator\Desktop\preprocessed_data",
-    year="2020",
+    root=r".\preprocessed_data",
+    year=2020,
     months=(11, 12, 1, 2, 3, 4, 5, 6, 7),
     train_fraction=0.01,
     pixels_per_tile=4096,
     balance_pixels=True,
     use_meta_stats=True,
-    meta_dir="./meta",
+    meta_dir="/data/meta",
     n_estimators=100,
     max_depth=8,
-    save_path="runs/xgb_custom.joblib"
+    save_path="/runs/xgb_custom.joblib"
 )
 
 # Train model

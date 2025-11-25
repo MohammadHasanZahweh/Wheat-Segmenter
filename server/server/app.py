@@ -8,16 +8,22 @@ import threading
 import time
 from uuid import uuid4
 
-from .config import MODELS_PATH, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest
+from .config import MODELS_PATH, DATA_PATH, RESULTS_DIR, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest, TrainRequest
 from server.train.sklearn_train import TrainConfig, train_sklearn_model
 from server.inference.tile_inference import run_on_multiple_tiles
+from server.model.torch_pixel_model import TorchPixelPatchModel
+
+import logging 
+
+logger = logging.getLogger()
+
 app = FastAPI(title="Wheat Mapping API")
 
 
 def _dataset_kwargs(cfg: TileDatasetConfig) -> dict[str, Any]:
     """Extract dataset kwargs from TileDatasetConfig."""
     kwargs = {
-        "root": cfg.root,
+        "project_name": cfg.root,
         "year": cfg.year,
         "regions": cfg.regions,
         "months": tuple(cfg.months),
@@ -26,11 +32,11 @@ def _dataset_kwargs(cfg: TileDatasetConfig) -> dict[str, Any]:
         "pixels_per_tile": cfg.pixels_per_tile,
         "balance_pixels": cfg.balance_pixels,
         "seed": cfg.seed,
+        "normalize": cfg.normalize,
     }
     # Add meta stats support (TrainConfig expects use_meta_stats and meta_dir, not band_stats)
-    if cfg.use_meta_stats:
-        kwargs["use_meta_stats"] = True
-        kwargs["meta_dir"] = cfg.meta_dir or "./meta"
+    kwargs["meta_dir"] = cfg.meta_dir
+
     return kwargs
 
 
@@ -111,7 +117,7 @@ def start_train(req: TileTrainRequest):
         "submitted_at": time.time(),
     }
     # Pydantic v1 uses dict(), v2 uses model_dump()
-    payload = req.dict() if hasattr(req, 'dict') else req.model_dump()
+    payload = req.model_dump()
     thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
     thread.start()
     return {"job_id": job_id, "status": "running"}
@@ -124,21 +130,36 @@ def train_status(id: str):
 @app.post("/inference")
 def start_train(req: YearInferenceRequest):
     job_id = f"job_{uuid4().hex}"
-    
+
+    if not req.model_name.endswith(".joblib"):
+        req.model_name += ".joblib"
+
+    if not (req.save_name.endswith(".tiff") or req.save_name.endswith(".tif")):
+        req.save_name += ".tiff"
+
     try:
-        from server.model.torch_pixel_model import TorchPixelPatchModel
-        model = TorchPixelPatchModel.load(req.model_path)
+        print(MODELS_PATH/req.project_name/req.model_name)
+        model = TorchPixelPatchModel.load(MODELS_PATH/req.project_name/req.model_name)
+
     except:
          return {"job_id": job_id, "status": "failed", "reason":"Unable to load model"}
     jobs[job_id] = {
         "status": "running",
-        "job_name": req.job_name,
+        "job_name": req.project_name + "_" + req.save_name,
         "submitted_at": time.time(),
     }
-    payload = req.model_dump()
-    thread = threading.Thread(target=run_on_multiple_tiles, args=(req.year,[0,1,2,3,4], model, req.save_path), daemon=True)
+    # payload = req.model_dump()
+    thread = threading.Thread(target=run_on_multiple_tiles, args=(DATA_PATH/req.region_name/ "download" ,req.year,[0,1,2,3,4], model, RESULTS_DIR/req.project_name/req.save_name), daemon=True)
     thread.start()
     return {"job_id": job_id, "status": "running"}
+
+@app.post("/pixel-train")
+def start_train(req: TrainRequest):
+    job_id = f"job_{int(time.time())}"
+    jobs[job_id] = {"status": "running"}
+    t = threading.Thread(target=train_job, args=(job_id, req.config_name), daemon=True)
+    t.start()
+    return {"job_id": job_id}
 
 
 # @app.post("/train")
@@ -167,13 +188,7 @@ def start_train(req: YearInferenceRequest):
 #         jobs[job_id].update({"status": "failed", "error": str(e)})
 
 
-# @app.post("/train")
-# def start_train(req: TrainRequest):
-#     job_id = f"job_{int(time.time())}"
-#     jobs[job_id] = {"status": "running"}
-#     t = threading.Thread(target=train_job, args=(job_id, req.config_name), daemon=True)
-#     t.start()
-#     return {"job_id": job_id}
+
 
 
 # @app.get("/train/status")

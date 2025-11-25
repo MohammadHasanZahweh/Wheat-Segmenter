@@ -4,10 +4,11 @@ from rasterio.windows import Window
 from typing import Callable, List
 import os
 from server.server.config import DATA_PATH
-
+import shutil
 import rasterio
 from rasterio.merge import merge
 from functools import partial
+from pathlib import Path
 
 months = [11,12,1,2,3,4,5,6,7,]
 years = [2020,]
@@ -82,6 +83,7 @@ def get_files_list(base_path, year, aoi, months=[11,12,1,2,3,4,5,6,7]):
 
 
 def run_on_tile_one_year(
+    base_path:Path,
     year: int,
     aoi: int,
     process_fn: Callable[[np.ndarray], np.ndarray],
@@ -117,7 +119,7 @@ def run_on_tile_one_year(
     # ------------------------------------------------------
     # 1) Get the file names for this tile/year
     # ------------------------------------------------------
-    file_paths: List[str] = get_files_list(DATA_PATH, year, aoi)
+    file_paths: List[str] = get_files_list(base_path, year, aoi)
     if len(file_paths) == 0:
         raise ValueError(f"No files found for year={year}, aoi={aoi}")
 
@@ -212,18 +214,21 @@ def run_on_tile_one_year(
 
 
 def run_on_multiple_tiles(
+        base_path:str,
         year: int,
         aois: List[int],
         model,
-        out_path: str,
+        out_path: Path,
         patch_size: int = 256,
         stride: int = 256,):
     os.makedirs("temp", exist_ok=True)
     for aoi in aois:
-        run_on_tile_one_year(year, aoi, partial(model.predict_patch, normalize = True), f"temp/{aoi}.tiff", patch_size, stride)
+        run_on_tile_one_year(base_path, year, aoi, partial(model.predict_patch, normalize = True), f"temp/{aoi}.tiff", patch_size, stride)
     
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     merge_tiffs([f"temp/{aoi}.tiff" for aoi in aois], output_path=out_path)
     print("merged_successfully")
+    shutil.rmtree("temp")
     
 
 
