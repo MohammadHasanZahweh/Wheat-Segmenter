@@ -99,5 +99,6 @@ class YearInferenceRequest(BaseModel):
     job_name: str
     model_path : str
     year:int
+    save_path:str
     # dataset: TileDatasetConfig
 

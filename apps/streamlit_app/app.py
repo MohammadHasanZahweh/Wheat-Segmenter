@@ -28,9 +28,9 @@ from rasterio.warp import transform_bounds
 project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
-from server.dataset.PatchDataset import WheatTilesDataset
+# from server.dataset.PatchDataset import WheatTilesDataset
 
-DEFAULT_DATA_ROOT = Path(os.environ.get("DATA_ROOT", r"C:\Users\Administrator\Desktop\preprocessed_data"))
+# DEFAULT_DATA_ROOT = Path(os.environ.get("DATA_ROOT", r"C:\Users\Administrator\Desktop\preprocessed_data"))
 
 
 # -----------------------------------------------------------------------------

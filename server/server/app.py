@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from .config import MODELS_PATH, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest
 from server.train.sklearn_train import TrainConfig, train_sklearn_model
-from server.inference.tile_inference import run_on_tile_one_year
+from server.inference.tile_inference import run_on_multiple_tiles
 app = FastAPI(title="Wheat Mapping API")
 
 
@@ -135,7 +135,7 @@ def start_train(req: YearInferenceRequest):
         "submitted_at": time.time(),
     }
     payload = req.model_dump()
-    thread = threading.Thread(target=infere, args=(job_id, payload), daemon=True)
+    thread = threading.Thread(target=run_on_multiple_tiles, args=(req.year,[0,1,2,3,4], model, req.save_path), daemon=True)
     thread.start()
     return {"job_id": job_id, "status": "running"}
 

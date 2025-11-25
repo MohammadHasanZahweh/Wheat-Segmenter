@@ -212,7 +212,7 @@ class SklearnWheatModel(AbstractModel):
         y_pred = self.predict_pixel(X)
         
         # Calculate metrics
-        from ml_utils import f1_iou
+        from .ml_utils import f1_iou
         f1, iou = f1_iou(y, y_pred)
         
         accuracy = (y == y_pred).mean()

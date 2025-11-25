@@ -36,7 +36,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from server.dataset.PatchDataset import WheatTilesDataset, StratifiedRandomSubset
-from ml_utils import build_xy_from_tiles, f1_iou
+from server.model.ml_utils import build_xy_from_tiles, f1_iou
 
 
 ModelType = Literal["xgboost", "histgb", "random_forest", "svm"]
