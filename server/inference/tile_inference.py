@@ -186,6 +186,7 @@ def run_on_tile_one_year(
             # --------------------------------------------------
             # 5) Create output raster on first patch
             # --------------------------------------------------
+            out_patch = out_patch.astype(np.uint8)
             if dst is None:
                 out_meta = ref.meta.copy()
                 out_meta.update(
@@ -196,6 +197,7 @@ def run_on_tile_one_year(
                         "dtype": out_patch.dtype,
                     }
                 )
+                print(out_meta)
                 dst = rasterio.open(out_path, "w", **out_meta)
 
             # --------------------------------------------------

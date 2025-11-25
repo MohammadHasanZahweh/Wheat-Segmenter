@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+import base64
 
 import threading
 import time
@@ -160,6 +162,20 @@ def start_train(req: TrainRequest):
     t = threading.Thread(target=train_job, args=(job_id, req.config_name), daemon=True)
     t.start()
     return {"job_id": job_id}
+
+@app.get("/results")
+def train_status(project: str, run:str):
+    if not run.endswith(".tiff"):
+        run += ".tiff"
+    if (RESULTS_DIR/project/run).exists():
+
+        with open(RESULTS_DIR/project/run, "rb") as img_file:
+            encoded = base64.b64encode(img_file.read()).decode("utf-8")
+
+        return JSONResponse(content={"image_base64": encoded, "status":"OK"})
+    else:
+        return {"status": f"failed to find image {project}/{run}"}
+    
 
 
 # @app.post("/train")
