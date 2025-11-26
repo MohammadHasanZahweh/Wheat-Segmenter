@@ -208,6 +208,7 @@ __marimo__/
 
 
 testing.ipynb
+testing*.ipynb
 test.py
 data
 runs
