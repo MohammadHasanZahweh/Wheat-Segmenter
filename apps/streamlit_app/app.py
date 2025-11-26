@@ -93,6 +93,8 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
         "year": int(sidebar_cfg.inference_year),
         "save_name": sidebar_cfg.save_name,
     }
+    if st.session_state.get("inference_geometries"):
+        base_request["geometries"] = st.session_state["inference_geometries"]
 
     if sidebar_cfg.start_inference:
         if not client.base:

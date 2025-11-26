@@ -33,8 +33,7 @@ def render_training_jobs(api_url: str):
                         st.metric("Precision", f"{job_status.get('precision', 0):.4f}")
                     with col4:
                         st.metric("Recall", f"{job_status.get('recall', 0):.4f}")
-                    with st.expander("Full Results", expanded=False):
-                        st.json(job_status)
+                    st.json(job_status)
                 elif status == "running":
                     st.info("Training in progress... Click 'Refresh Job Status' to update.")
                     if st.button("Auto-refresh every 10s", key="auto_refresh_btn"):
@@ -170,17 +169,17 @@ def render_config_select(sidebar_cfg):
         key="inference_map",
     )
 
-    geom = None
     if map_output and map_output.get("all_drawings"):
         drawings = map_output["all_drawings"]
         if drawings:
+            st.session_state["inference_geometries"] = [d["geometry"] for d in drawings]
             geom = shape(drawings[-1]["geometry"])
-            st.session_state["selected_geom"] = drawings[-1]["geometry"]
-            st.success(f"Geometry selected: {drawings[-1]['geometry']['type']}")
+            st.success(f"Captured {len(drawings)} geometries. Latest: {drawings[-1]['geometry']['type']}")
             if geom.is_valid and geom.area:
-                st.caption(f"Approx area (degrees^2): {geom.area:.4f}")
+                st.caption(f"Latest approx area (degrees^2): {geom.area:.4f}")
     else:
         st.info("No geometry selected yet.")
+        st.session_state.pop("inference_geometries", None)
 
     request_template: Dict[str, Any] = st.session_state.get("inference_request") or {
         "project_name": sidebar_cfg.project_name,
@@ -189,6 +188,8 @@ def render_config_select(sidebar_cfg):
         "year": sidebar_cfg.inference_year,
         "save_name": sidebar_cfg.save_name,
     }
+    if st.session_state.get("inference_geometries"):
+        request_template["geometries"] = st.session_state["inference_geometries"]
     st.markdown("**Current inference request template:**")
     st.code(json.dumps(request_template, indent=2), language="json")
 
