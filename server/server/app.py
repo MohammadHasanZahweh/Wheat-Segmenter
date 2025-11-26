@@ -12,7 +12,7 @@ from uuid import uuid4
 from shapely.geometry import Polygon
 from .config import MODELS_PATH, DATA_PATH,PATCH_PROCESS_DATA_PATH, RESULTS_DIR, LebanonInferenceRequest, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest, TrainRequest
 from server.train.sklearn_train import TrainConfig, train_sklearn_model
-from server.inference.tile_inference import run_on_multiple_tiles
+from server.inference.poly_tile_inference import run_on_multiple_tiles
 from server.inference.inference_lebanon import run_on_lebanon_one_year
 from server.model.torch_pixel_model import TorchPixelPatchModel
 from server.model.sklearn_models import load_model as load_sklearn_model
@@ -153,7 +153,7 @@ def train_job(job_id: str, payload: dict[str, Any]) -> None:
         jobs[job_id].update({"status": "failed", "error": str(exc)})
 
 
-def run_inference_job(job_id: str, data_path: Path, year: int, aois: list, model, output_path: Path) -> None:
+def run_inference_job(job_id: str, data_path: Path, year: int, aois: list, model, output_path: Path, polygon) -> None:
     try:
         print(f"\n{'='*60}", flush=True)
         print(f"[API INFERENCE] Starting job {job_id}", flush=True)
@@ -168,6 +168,7 @@ def run_inference_job(job_id: str, data_path: Path, year: int, aois: list, model
             aois=aois,
             model=model,
             out_path=output_path,
+            polygons=polygon,
             patch_size=256,
             stride=256
         )
@@ -326,10 +327,13 @@ def start_inference(req: YearInferenceRequest):
     
     data_path = DATA_PATH / req.region_name / "download"
     output_path = RESULTS_DIR / req.project_name / req.save_name
+
+    coords = req.geometry.coordinates[0]  # outer ring
+    poly = Polygon(coords)
     
     thread = threading.Thread(
         target=run_inference_job, 
-        args=(job_id, data_path, req.year, [0, 1, 2, 3, 4], model, output_path), 
+        args=(job_id, data_path, req.year, [0, 1, 2, 3, 4], model, output_path, poly), 
         daemon=True
     )
     thread.start()

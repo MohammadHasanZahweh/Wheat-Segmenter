@@ -133,6 +133,7 @@ class YearInferenceRequest(BaseModel):
     model_name : str
     year:int
     save_name:str
+    geometry: GeoJSONPolygon
     # dataset: TileDatasetConfig
 
 # class LebanonInferenceRequest(BaseModel):
