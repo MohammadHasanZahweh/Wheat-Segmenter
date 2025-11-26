@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict, Any
 import numpy as np
 
-from server.server.config import ModelType, SklearnType, ModelRun, PIXEL_SPLIT_DATA_PATH, PixelTrainRequest, MODELS_PATH
+from server.server.config import ModelType, SklearnType, ModelRun, PIXEL_SPLIT_DATA_PATH, PixelTrainRequest, MODELS_PATH, META_PATH
 from server.dataset.PixelDataset import PixelRangeNPYDataset, PixelFromKNPYDataset
 from server.model.sklearn_pixel_model import SklearnModel
 from server.model.torch_pixel_model import TorchPixelPatchModel
@@ -19,9 +19,9 @@ def train_pixel_model(req: PixelTrainRequest) -> Dict[str, Any]:
     root = PIXEL_SPLIT_DATA_PATH / req.class_root
     
 
-    train_ds = PixelRangeNPYDataset(root, 0, req.train_batches - 1)
-    val_ds   = PixelRangeNPYDataset(root, req.train_batches, req.train_batches + req.val_batches - 1)
-    test_ds  = PixelFromKNPYDataset(root, req.train_batches + req.val_batches )
+    train_ds = PixelRangeNPYDataset(root, 0, req.train_batches - 1, meta_files=META_PATH)
+    val_ds   = PixelRangeNPYDataset(root, req.train_batches, req.train_batches + req.val_batches - 1, meta_files=META_PATH)
+    test_ds  = PixelFromKNPYDataset(root, req.train_batches + req.val_batches , meta_files=META_PATH)
 
     print(f"Train size: {len(train_ds)}")
     print(f"Val size:   {len(val_ds)}")
