@@ -77,25 +77,6 @@ class TorchPixelPatchModel(AbstractModel):
         model.net.load_state_dict(checkpoint["state_dict"])
         return model
 
-    # ---------- Inference: pixel ----------
-
-    # def predict_pixel(self, array: np.ndarray, normalize = False) -> np.ndarray:
-    #     """
-    #     array: shape (N, 9, 13)
-    #     returns: shape (N,) integer labels
-    #     """
-    #     self.net.eval()
-
-    #     x = torch.from_numpy(array).float().to(self.device)
-    #     # flatten 9x13 -> 117
-    #     x = x.view(x.shape[0], -1)
-
-    #     with torch.no_grad():
-    #         logits = self.net(x)  # (N, num_classes)
-    #         preds = torch.argmax(logits, dim=1)  # (N,)
-
-    #     return preds.cpu().numpy()
-
    
     # ---------------------------------------------------------------------
     #  ✔ PREDICT PIXEL  (same API as AbstractModel)

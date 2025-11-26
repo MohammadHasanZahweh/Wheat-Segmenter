@@ -12,71 +12,12 @@ import os
 import shutil
 from functools import partial
 
-def merge_tiffs(tiff_paths, output_path=None):
-    """
-    Merge multiple GeoTIFF files into a single mosaic.
-
-    Parameters
-    ----------
-    tiff_paths : list[str]
-        List of file paths to the input TIFF files.
-    output_path : str or None
-        Path to save the merged TIFF. If None, returns the array + transform.
-
-    Returns
-    -------
-    (mosaic, out_transform) if output_path is None
-    else output_path
-    """
-
-    # 1. Open all TIFFs
-    src_files_to_mosaic = [rasterio.open(fp) for fp in tiff_paths]
-
-    # 2. Merge
-    mosaic, out_transform = merge(src_files_to_mosaic)
-
-    # 3. If no output path, return the data
-    if output_path is None:
-        for src in src_files_to_mosaic:
-            src.close()
-        return mosaic, out_transform
-
-    # 4. Write merged file
-    out_meta = src_files_to_mosaic[0].meta.copy()
-    out_meta.update({
-        "driver": "GTiff",
-        "height": mosaic.shape[1],
-        "width": mosaic.shape[2],
-        "transform": out_transform,
-    })
-
-    with rasterio.open(output_path, "w", **out_meta) as dest:
-        dest.write(mosaic)
-
-    # Close all input files
-    for src in src_files_to_mosaic:
-        src.close()
-
-    return output_path
-
 PolygonLike = Union[Mapping, "shapely.geometry.base.BaseGeometry"]
 
-def get_file_name(base_path, year, month, aoi):
-    """
-    Returns a list of file paths (9 GeoTIFFs with 13 bands each)
-    for a single tile / AOI and a given year.
-    """
-    if month > 10:
-        path = f"year_{year-1}/aoi_0_{aoi}/month_{month:02}"
-    else:
-        path = f"year_{year}/aoi_0_{aoi}/month_{month:02}"
-    
-    path = os.path.join(base_path, path)
-    path = os.path.join(path, os.listdir(path)[0], "response.tiff")
-    return path
 
-def get_files_list(base_path, year, aoi, months=[11,12,1,2,3,4,5,6,7]):
-    return [get_file_name(base_path, year, month, aoi) for month in months]
+
+def get_files_list(base_path = Path("data\Lebanon\merge_data"), year=2020, months=[11,12,1,2,3,4,5,6,7]):
+    return [base_path/f"year_{year}_month_{month}.tiff" if month < 10 else base_path/f"year_{year-1}_month_{month}.tiff" for month in months]
 
 def _bounds_intersect(b1, b2) -> bool:
     """
@@ -134,10 +75,9 @@ def _polygon_bounds(poly: PolygonLike):
             raise ValueError("Could not get bounds from polygon-like object.")
 
 
-def run_on_tile_one_year(
+def run_on_lebanon_one_year(
     base_path: Path,
     year: int,
-    aoi: int,
     process_fn: Callable[[np.ndarray], np.ndarray],
     out_path: str,
     polygons,  # <- now supports single polygon, list of polygons, or GeoPandas GeoDataFrame/GeoSeries
@@ -182,9 +122,9 @@ def run_on_tile_one_year(
     # ------------------------------------------------------
     geometries: List[PolygonLike] = _normalize_polygons(polygons)
 
-    file_paths: List[str] = get_files_list(base_path, year, aoi)
+    file_paths: List[str] = get_files_list(base_path, year)
     if len(file_paths) == 0:
-        raise ValueError(f"No files found for year={year}, aoi={aoi}")
+        raise ValueError(f"No files found for year={year}")
 
     # Open all images (9 time steps, each with 13 bands)
     srcs = [rasterio.open(fp) for fp in file_paths]
@@ -369,23 +309,3 @@ def run_on_tile_one_year(
 
     for src in srcs:
         src.close()
-
-def run_on_multiple_tiles(
-        base_path:str,
-        year: int,
-        aois: List[int],
-        model,
-        polygons,
-        out_path: Path,
-        patch_size: int = 256,
-        stride: int = 256,):
-    os.makedirs("temp", exist_ok=True)
-    for aoi in aois:
-        run_on_tile_one_year(base_path, year, aoi, partial(model.predict_patch, normalize = True), f"temp/{aoi}.tiff", polygons, patch_size, stride)
-    
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    merge_tiffs([f"temp/{aoi}.tiff" for aoi in aois if os.path.exists(f"temp/{aoi}.tiff")], output_path=out_path)
-    print("merged_successfully")
-    shutil.rmtree("temp")
-    
-
