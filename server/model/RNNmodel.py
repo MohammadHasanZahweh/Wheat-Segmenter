@@ -13,7 +13,7 @@ class RNNPixelPatchModel(AbstractModel):
     pixel and patch predictions.
     """
 
-    def __init__(self, classes, hidden_dims = [64,32], lr=1e-3, device=None, mean = np.array([0]), std = np.array([1])):
+    def __init__(self, classes, hidden_dims = 32, layer_count = 2, lr=1e-3, device=None, mean = np.array([0]), std = np.array([1])):
         self.num_classes = int(len(classes))
         self.classes = classes
         self.lr = lr
@@ -22,27 +22,14 @@ class RNNPixelPatchModel(AbstractModel):
         self.mean = mean
         self.std = std
 
-        input_dim = 9 * 13  # each feature is a 9x13 patch that we flatten
+        input_dim = 13  # each feature is a 9x13 patch that we flatten
 
-        assert len(hidden_dims) >= 1
-        
-        if len(hidden_dims) == 1:
-            # simple MLP
-            self.net = nn.Sequential(
-                nn.RNN(input_dim, hidden_dims[0]),
-                nn.ReLU(),
-                nn.RNN(hidden_dims[0], self.num_classes),
+        # simple MLP
+        self.net = nn.Sequential(
+                nn.RNN(input_dim, hidden_dims, num_layers=layer_count),
+                nn.Linear(hidden_dims, self.num_classes),
             ).to(self.device)
-        else:
-            input_dim = 9 * 13
-            self.net = nn.Sequential()
-            for i in hidden_dims:
-                self.net.append(nn.Linear(input_dim,i))
-                self.net.append(nn.ReLU())
-                input_dim = i
-            self.net.append(nn.Linear(input_dim, self.num_classes))
-            self.net.to(self.device)
-
+        
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.lr)
 

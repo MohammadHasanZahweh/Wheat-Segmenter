@@ -8,6 +8,7 @@ from server.server.config import ModelType, SklearnType, ModelRun, PIXEL_SPLIT_D
 from server.dataset.PixelDataset import PixelRangeNPYDataset, PixelFromKNPYDataset
 from server.model.sklearn_pixel_model import SklearnModel
 from server.model.torch_pixel_model import TorchPixelPatchModel
+from server.model.RNNmodel import RNNPixelPatchModel
 
 
 # -------------------------------------------------------
@@ -36,9 +37,15 @@ def train_pixel_model(req: PixelTrainRequest) -> Dict[str, Any]:
     # -----------------------
     if req.model_type == ModelType.SKLEARN:
         model = SklearnModel(req.sub_model_type)
+        save_path = MODELS_PATH / (req.run_save_name + ".sklearn.joblib")
     
     elif req.model_type == ModelType.TORCH:
+        save_path = MODELS_PATH / (req.run_save_name + ".torch.joblib")
         model = TorchPixelPatchModel(train_ds.class_names, mean=train_ds.mean, std=train_ds.std)
+    
+    elif req.model_type == ModelType.RNN:
+        save_path = MODELS_PATH / (req.run_save_name + ".rnn.joblib")
+        model = RNNPixelPatchModel(train_ds.class_names, mean=train_ds.mean, std=train_ds.std)
     
     else:
         raise NotImplementedError(f"Model type {req.model_type} not supported yet.")
@@ -55,7 +62,6 @@ def train_pixel_model(req: PixelTrainRequest) -> Dict[str, Any]:
     # -----------------------
     # Save
     # -----------------------
-    save_path = MODELS_PATH / (req.run_save_name + ".joblib")
     save_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(save_path)
     # joblib.dump(model, save_path)

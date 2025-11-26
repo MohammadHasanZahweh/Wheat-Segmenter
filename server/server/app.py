@@ -5,14 +5,15 @@ from typing import Any, Callable, Dict
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import base64
-
+from functools import partial
 import threading
 import time
 from uuid import uuid4
-
-from .config import MODELS_PATH, DATA_PATH, RESULTS_DIR, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest, TrainRequest
+from shapely.geometry import Polygon
+from .config import MODELS_PATH, DATA_PATH,PATCH_PROCESS_DATA_PATH, RESULTS_DIR, LebanonInferenceRequest, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest, TrainRequest
 from server.train.sklearn_train import TrainConfig, train_sklearn_model
 from server.inference.tile_inference import run_on_multiple_tiles
+from server.inference.inference_lebanon import run_on_lebanon_one_year
 from server.model.torch_pixel_model import TorchPixelPatchModel
 from server.model.sklearn_models import load_model as load_sklearn_model
 import joblib
@@ -22,11 +23,6 @@ import logging
 logger = logging.getLogger()
 
 app = FastAPI(title="Wheat Mapping API")
-
-
-@app.get("/")
-def root():
-    return {"message": "Wheat Mapping API", "status": "running", "endpoints": ["/health", "/train", "/inference", "/models/list"]}
 
 
 @app.get("/")
@@ -97,8 +93,7 @@ def _run_training_job(req: TileTrainRequest) -> dict[str, Any]:
     }
     
     # Use the actual preprocessed_data path
-    # Structure: C:\Users\Administrator\Desktop\preprocessed_data
-    root_path = r"C:\Users\Administrator\Desktop\preprocessed_data"
+    root_path = PATCH_PROCESS_DATA_PATH
     
     # Build base config
     cfg = TrainConfig(
@@ -188,6 +183,36 @@ def run_inference_job(job_id: str, data_path: Path, year: int, aois: list, model
         print(f"\n[API INFERENCE] Job {job_id} FAILED: {exc}\n", flush=True)
         jobs[job_id].update({"status": "failed", "error": str(exc)})
 
+def run_inference_job_lebanon(job_id: str, data_path: Path, year: int, model, output_path: Path, polygons) -> None:
+    try:
+        print(f"\n{'='*60}", flush=True)
+        print(f"[API INFERENCE] Starting job {job_id}", flush=True)
+        print(f"  Data: {data_path}", flush=True)
+        print(f"  Year: {year}", flush=True)
+        print(f"  Output: {output_path}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+        
+
+        run_on_lebanon_one_year(
+            base_path=data_path,
+            year=year,
+            polygons=polygons,
+            process_fn=partial(model.predict_patch, normalize = True),
+            out_path=output_path,
+            patch_size=256,
+            stride=256
+        )
+        
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["output_path"] = str(output_path)
+        
+        print(f"\n{'='*60}", flush=True)
+        print(f"[API INFERENCE] Job {job_id} completed!", flush=True)
+        print(f"  Output saved to: {output_path}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+    except Exception as exc:
+        print(f"\n[API INFERENCE] Job {job_id} FAILED: {exc}\n", flush=True)
+        jobs[job_id].update({"status": "failed", "error": str(exc)})
 
 @app.post("/train")
 def start_train(req: TileTrainRequest):
@@ -199,11 +224,8 @@ def start_train(req: TileTrainRequest):
             "algorithm": req.algorithm.value,
             "submitted_at": time.time(),
         }
-        # Pydantic v1 uses dict(), v2 uses model_dump()
-        try:
-            payload = req.model_dump()  # Pydantic v2
-        except AttributeError:
-            payload = req.dict()  # Pydantic v1
+
+        payload = req.model_dump()  
         
         thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
         thread.start()
@@ -308,6 +330,105 @@ def start_inference(req: YearInferenceRequest):
     thread = threading.Thread(
         target=run_inference_job, 
         args=(job_id, data_path, req.year, [0, 1, 2, 3, 4], model, output_path), 
+        daemon=True
+    )
+    thread.start()
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.post("/inference-lebanon")
+def start_inference_lebanon(req: LebanonInferenceRequest):
+    job_id = f"job_{uuid4().hex}"
+
+    print(req)
+
+    if not (req.save_name.endswith(".tiff") or req.save_name.endswith(".tif")):
+        req.save_name += ".tiff"
+
+    # Auto-detect model type based on extension pattern
+    model_name = req.model_name
+    model_path = None
+    model_type = None
+    
+    # Determine model type by checking for .sklearn or .torch in the name
+    if '.sklearn' in model_name:
+        # Sklearn model
+        model_type = "sklearn"
+        # Ensure proper extension
+        if not model_name.endswith('.sklearn.joblib'):
+            if model_name.endswith('.sklearn'):
+                model_name = model_name + '.joblib'
+            elif model_name.endswith('.joblib'):
+                model_name = model_name.replace('.joblib', '.sklearn.joblib')
+            else:
+                model_name = model_name + '.sklearn.joblib'
+        model_path = MODELS_PATH / req.project_name / model_name
+        
+    elif '.torch' in model_name:
+        # Torch model
+        model_type = "torch"
+        # Ensure proper extension
+        if not model_name.endswith('.torch.joblib'):
+            if model_name.endswith('.torch'):
+                model_name = model_name + '.joblib'
+            elif model_name.endswith('.joblib'):
+                model_name = model_name.replace('.joblib', '.torch.joblib')
+            else:
+                model_name = model_name + '.torch.joblib'
+        model_path = MODELS_PATH / req.project_name / model_name
+        
+    else:
+        # No extension provided - try both
+        sklearn_path = MODELS_PATH / req.project_name / (model_name + '.sklearn.joblib')
+        torch_path = MODELS_PATH / req.project_name / (model_name + '.torch.joblib')
+        
+        if sklearn_path.exists():
+            model_path = sklearn_path
+            model_type = "sklearn"
+            model_name = model_name + '.sklearn.joblib'
+        elif torch_path.exists():
+            model_path = torch_path
+            model_type = "torch"
+            model_name = model_name + '.torch.joblib'
+        else:
+            return {"job_id": job_id, "status": "failed", 
+                    "reason": f"Model not found. Tried: {sklearn_path.name} and {torch_path.name}"}
+    
+    if model_path is None or not model_path.exists():
+        return {"job_id": job_id, "status": "failed", "reason": f"Model not found: {model_path}"}
+    
+    try:
+        print(f"[INFERENCE] Loading {model_type} model from {model_path}")
+        
+        if model_type == "sklearn":
+            # Load sklearn model with meta_dir for normalization
+            meta_dir = str(DATA_PATH / "meta") if (DATA_PATH / "meta").exists() else None
+            model = load_sklearn_model(str(model_path), meta_dir=meta_dir)
+            print(f"[INFERENCE] sklearn model loaded successfully: {model.model_type}")
+        else:
+            # Load torch model
+            model = TorchPixelPatchModel.load(model_path)
+            print(f"[INFERENCE] torch model loaded successfully")
+            
+    except Exception as e:
+        return {"job_id": job_id, "status": "failed", "reason": f"Unable to load model: {str(e)}"}
+    
+    jobs[job_id] = {
+        "status": "running",
+        "job_name": req.project_name + "_" + req.save_name,
+        "model_name": model_name,
+        "model_type": model_type,
+        "submitted_at": time.time(),
+    }
+    
+    data_path = DATA_PATH / "Lebanon/merge_data"
+    output_path = RESULTS_DIR / req.project_name / req.save_name
+    coords = req.geometry.coordinates[0]  # outer ring
+    poly = Polygon(coords)
+
+    thread = threading.Thread(
+        target=run_inference_job_lebanon, 
+        args=(job_id, data_path, req.year,  model, output_path,poly), 
         daemon=True
     )
     thread.start()

@@ -12,6 +12,7 @@ DATA_PATH   = Path(os.getenv("DATA_DIR", r"./data"))
 META_PATH   = DATA_PATH / "meta/wheat"
 PROCESS_DATA_PATH       = DATA_PATH/"processed_data"
 PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data"
+PATCH_PROCESS_DATA_PATH   = PROCESS_DATA_PATH/"patch_processed_data"
 
 MODELS_PATH = Path(os.getenv("RUNS_DIR", r"./runs"))
 RESULTS_DIR = Path(os.getenv("RESULTS_DIR", r"./results"))
@@ -24,7 +25,8 @@ class ModelType(Enum):
     ONNX    = "onnx_model"
     SKLEARN = "sklearn_pipeline"
     XGBOOST = "xgboost_model"
-    TORCH   = "torch_model"   # currently not implemented
+    TORCH   = "torch_model"  
+    RNN   = "RNN" 
 
 
 # ---------------------------
@@ -118,6 +120,10 @@ class TrainRequest(BaseModel):
     model_name: Optional[str] = None
     model_params: Optional[Dict[str, Any]] = None
 
+class GeoJSONPolygon(BaseModel):
+    type: str = "Polygon"
+    coordinates: List[List[List[float]]]  # [[[lon, lat], ...]]
+
 class YearInferenceRequest(BaseModel):
     """
     Request payload for API-triggered year jobs.
@@ -129,3 +135,24 @@ class YearInferenceRequest(BaseModel):
     save_name:str
     # dataset: TileDatasetConfig
 
+# class LebanonInferenceRequest(BaseModel):
+#     """
+#     Request payload for API-triggered year jobs.
+#     """
+#     polygon:str
+#     project_name: str
+#     model_name : str
+#     year:int
+#     save_name:str
+#     # dataset: TileDatasetConfig
+
+
+
+
+
+class LebanonInferenceRequest(BaseModel):
+    project_name: str
+    model_name: str
+    year: int
+    save_name: str
+    geometry: GeoJSONPolygon
