@@ -14,6 +14,8 @@ from .config import MODELS_PATH, DATA_PATH, RESULTS_DIR, TileDatasetConfig, Tile
 from server.train.sklearn_train import TrainConfig, train_sklearn_model
 from server.inference.tile_inference import run_on_multiple_tiles
 from server.model.torch_pixel_model import TorchPixelPatchModel
+from server.model.sklearn_models import load_model as load_sklearn_model
+import joblib
 
 import logging 
 
@@ -22,13 +24,26 @@ logger = logging.getLogger()
 app = FastAPI(title="Wheat Mapping API")
 
 
+@app.get("/")
+def root():
+    return {"message": "Wheat Mapping API", "status": "running", "endpoints": ["/health", "/train", "/inference", "/models/list"]}
+
+
+@app.get("/")
+def root():
+    return {"message": "Wheat Mapping API", "status": "running", "endpoints": ["/health", "/train", "/inference", "/models/list"]}
+
+
 def _dataset_kwargs(cfg: TileDatasetConfig) -> dict[str, Any]:
     """Extract dataset kwargs from TileDatasetConfig."""
+    # Use project_name to construct root path
+    root_path = str(DATA_PATH.parent / "preprocessed_data" / cfg.project_name)
+    
     kwargs = {
-        "project_name": cfg.root,
-        "year": cfg.year,
+        "root_preprocessed": root_path,
+        "year": str(cfg.year),
         "regions": cfg.regions,
-        "months": tuple(cfg.months),
+        "month_order": tuple(cfg.months),
         "train_fraction": cfg.train_fraction,
         "test_fraction": cfg.test_fraction,
         "pixels_per_tile": cfg.pixels_per_tile,
@@ -45,10 +60,30 @@ def _dataset_kwargs(cfg: TileDatasetConfig) -> dict[str, Any]:
 def _resolve_save_path(req: TileTrainRequest) -> str | None:
     if not req.save_model:
         return None
+    
+    # Get project name from dataset or use default
+    project_name = req.dataset.project_name if req.dataset else "default"
+    
+    # If user provided full path with extension, use it as-is
     if req.output_path:
-        return str(Path(req.output_path))
-    default_name = f"{req.job_name}_{req.algorithm.value}.joblib"
-    return str((MODELS_PATH / default_name).resolve())
+        output = str(Path(req.output_path))
+        # Auto-add .sklearn.joblib if they only provided base name
+        if not output.endswith('.sklearn.joblib') and not output.endswith('.joblib'):
+            output = output + '.sklearn.joblib'
+        elif output.endswith('.joblib') and not output.endswith('.sklearn.joblib'):
+            output = output.replace('.joblib', '.sklearn.joblib')
+        return output
+    
+    # Auto-generate path: runs/{project_name}/{job_name}.sklearn.joblib
+    job_name = req.job_name
+    # Remove any existing extensions user might have added
+    for ext in ['.sklearn.joblib', '.joblib', '.sklearn']:
+        if job_name.endswith(ext):
+            job_name = job_name[:-len(ext)]
+    
+    default_name = f"{job_name}.sklearn.joblib"
+    project_dir = MODELS_PATH / project_name
+    return str((project_dir / default_name).resolve())
 
 
 def _run_training_job(req: TileTrainRequest) -> dict[str, Any]:
@@ -57,14 +92,28 @@ def _run_training_job(req: TileTrainRequest) -> dict[str, Any]:
     model_type_map = {
         TrainingAlgorithm.SVM: "svm",
         TrainingAlgorithm.RANDOM_FOREST: "random_forest",
-        TrainingAlgorithm.HISTOGRAM_GB: "hist_gradient_boosting",
+        TrainingAlgorithm.HISTOGRAM_GB: "histgb",
         TrainingAlgorithm.XGBOOST: "xgboost",
     }
+    
+    # Use the actual preprocessed_data path
+    # Structure: C:\Users\Administrator\Desktop\preprocessed_data
+    root_path = r"C:\Users\Administrator\Desktop\preprocessed_data"
     
     # Build base config
     cfg = TrainConfig(
         model_type=model_type_map[req.algorithm],
-        **_dataset_kwargs(req.dataset),
+        root=root_path,
+        year=str(req.dataset.year),
+        regions=req.dataset.regions,
+        months=tuple(req.dataset.months),
+        train_fraction=req.dataset.train_fraction,
+        test_fraction=req.dataset.test_fraction,
+        pixels_per_tile=req.dataset.pixels_per_tile,
+        balance_pixels=req.dataset.balance_pixels,
+        seed=req.dataset.seed,
+        use_meta_stats=bool(req.dataset.meta_dir),
+        meta_dir=req.dataset.meta_dir or "./meta",
         save_model=_resolve_save_path(req),
     )
     
@@ -109,20 +158,61 @@ def train_job(job_id: str, payload: dict[str, Any]) -> None:
         jobs[job_id].update({"status": "failed", "error": str(exc)})
 
 
+def run_inference_job(job_id: str, data_path: Path, year: int, aois: list, model, output_path: Path) -> None:
+    try:
+        print(f"\n{'='*60}", flush=True)
+        print(f"[API INFERENCE] Starting job {job_id}", flush=True)
+        print(f"  Data: {data_path}", flush=True)
+        print(f"  Year: {year}, AOIs: {aois}", flush=True)
+        print(f"  Output: {output_path}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+        
+        run_on_multiple_tiles(
+            base_path=str(data_path),
+            year=year,
+            aois=aois,
+            model=model,
+            out_path=output_path,
+            patch_size=256,
+            stride=256
+        )
+        
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["output_path"] = str(output_path)
+        
+        print(f"\n{'='*60}", flush=True)
+        print(f"[API INFERENCE] Job {job_id} completed!", flush=True)
+        print(f"  Output saved to: {output_path}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+    except Exception as exc:
+        print(f"\n[API INFERENCE] Job {job_id} FAILED: {exc}\n", flush=True)
+        jobs[job_id].update({"status": "failed", "error": str(exc)})
+
+
 @app.post("/train")
 def start_train(req: TileTrainRequest):
-    job_id = f"job_{uuid4().hex}"
-    jobs[job_id] = {
-        "status": "running",
-        "job_name": req.job_name,
-        "algorithm": req.algorithm.value,
-        "submitted_at": time.time(),
-    }
-    # Pydantic v1 uses dict(), v2 uses model_dump()
-    payload = req.model_dump()
-    thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
-    thread.start()
-    return {"job_id": job_id, "status": "running"}
+    try:
+        job_id = f"job_{uuid4().hex}"
+        jobs[job_id] = {
+            "status": "running",
+            "job_name": req.job_name,
+            "algorithm": req.algorithm.value,
+            "submitted_at": time.time(),
+        }
+        # Pydantic v1 uses dict(), v2 uses model_dump()
+        try:
+            payload = req.model_dump()  # Pydantic v2
+        except AttributeError:
+            payload = req.dict()  # Pydantic v1
+        
+        thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
+        thread.start()
+        return {"job_id": job_id, "status": "running"}
+    except Exception as e:
+        print(f"[ERROR] Failed to start training: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return {"status": "failed", "error": str(e)}
 
 
 @app.get("/train/status")
@@ -130,28 +220,96 @@ def train_status(id: str):
     return jobs.get(id, {"status": "unknown"})
 
 @app.post("/inference")
-def start_train(req: YearInferenceRequest):
+def start_inference(req: YearInferenceRequest):
     job_id = f"job_{uuid4().hex}"
-
-    if not req.model_name.endswith(".joblib"):
-        req.model_name += ".joblib"
 
     if not (req.save_name.endswith(".tiff") or req.save_name.endswith(".tif")):
         req.save_name += ".tiff"
 
+    # Auto-detect model type based on extension pattern
+    model_name = req.model_name
+    model_path = None
+    model_type = None
+    
+    # Determine model type by checking for .sklearn or .torch in the name
+    if '.sklearn' in model_name:
+        # Sklearn model
+        model_type = "sklearn"
+        # Ensure proper extension
+        if not model_name.endswith('.sklearn.joblib'):
+            if model_name.endswith('.sklearn'):
+                model_name = model_name + '.joblib'
+            elif model_name.endswith('.joblib'):
+                model_name = model_name.replace('.joblib', '.sklearn.joblib')
+            else:
+                model_name = model_name + '.sklearn.joblib'
+        model_path = MODELS_PATH / req.project_name / model_name
+        
+    elif '.torch' in model_name:
+        # Torch model
+        model_type = "torch"
+        # Ensure proper extension
+        if not model_name.endswith('.torch.joblib'):
+            if model_name.endswith('.torch'):
+                model_name = model_name + '.joblib'
+            elif model_name.endswith('.joblib'):
+                model_name = model_name.replace('.joblib', '.torch.joblib')
+            else:
+                model_name = model_name + '.torch.joblib'
+        model_path = MODELS_PATH / req.project_name / model_name
+        
+    else:
+        # No extension provided - try both
+        sklearn_path = MODELS_PATH / req.project_name / (model_name + '.sklearn.joblib')
+        torch_path = MODELS_PATH / req.project_name / (model_name + '.torch.joblib')
+        
+        if sklearn_path.exists():
+            model_path = sklearn_path
+            model_type = "sklearn"
+            model_name = model_name + '.sklearn.joblib'
+        elif torch_path.exists():
+            model_path = torch_path
+            model_type = "torch"
+            model_name = model_name + '.torch.joblib'
+        else:
+            return {"job_id": job_id, "status": "failed", 
+                    "reason": f"Model not found. Tried: {sklearn_path.name} and {torch_path.name}"}
+    
+    if model_path is None or not model_path.exists():
+        return {"job_id": job_id, "status": "failed", "reason": f"Model not found: {model_path}"}
+    
     try:
-        print(MODELS_PATH/req.project_name/req.model_name)
-        model = TorchPixelPatchModel.load(MODELS_PATH/req.project_name/req.model_name)
-
-    except:
-         return {"job_id": job_id, "status": "failed", "reason":"Unable to load model"}
+        print(f"[INFERENCE] Loading {model_type} model from {model_path}")
+        
+        if model_type == "sklearn":
+            # Load sklearn model with meta_dir for normalization
+            meta_dir = str(DATA_PATH / "meta") if (DATA_PATH / "meta").exists() else None
+            model = load_sklearn_model(str(model_path), meta_dir=meta_dir)
+            print(f"[INFERENCE] sklearn model loaded successfully: {model.model_type}")
+        else:
+            # Load torch model
+            model = TorchPixelPatchModel.load(model_path)
+            print(f"[INFERENCE] torch model loaded successfully")
+            
+    except Exception as e:
+        return {"job_id": job_id, "status": "failed", "reason": f"Unable to load model: {str(e)}"}
+    
     jobs[job_id] = {
         "status": "running",
         "job_name": req.project_name + "_" + req.save_name,
+        "model_name": model_name,
+        "model_type": model_type,
         "submitted_at": time.time(),
     }
-    # payload = req.model_dump()
-    thread = threading.Thread(target=run_on_multiple_tiles, args=(DATA_PATH/req.region_name/ "download" ,req.year,[0,1,2,3,4], model, RESULTS_DIR/req.project_name/req.save_name), daemon=True)
+    
+    data_path = DATA_PATH / req.region_name / "download"
+    output_path = RESULTS_DIR / req.project_name / req.save_name
+    
+    thread = threading.Thread(
+        target=run_inference_job, 
+        args=(job_id, data_path, req.year, [0, 1, 2, 3, 4], model, output_path), 
+        daemon=True
+    )
     thread.start()
     return {"job_id": job_id, "status": "running"}
 
@@ -164,15 +322,252 @@ def start_train(req: TrainRequest):
     return {"job_id": job_id}
 
 @app.get("/results")
-def train_status(project: str, run:str):
+def get_results(project: str, run: str):
     if not run.endswith(".tiff"):
         run += ".tiff"
-    if (RESULTS_DIR/project/run).exists():
-
-        with open(RESULTS_DIR/project/run, "rb") as img_file:
+    
+    result_path = RESULTS_DIR / project / run
+    if result_path.exists():
+        with open(result_path, "rb") as img_file:
             encoded = base64.b64encode(img_file.read()).decode("utf-8")
-
-        return JSONResponse(content={"image_base64": encoded, "status":"OK"})
+        return JSONResponse(content={"image_base64": encoded, "status": "OK"})
     else:
+<<<<<<< HEAD
         return {"status": f"failed to find image {project}/{run}"}
     
+=======
+        return {"status": "failed", "error": f"Result not found: {project}/{run}"}
+
+
+@app.get("/models/list")
+def list_models():
+    """List all available trained models."""
+    models = []
+    if MODELS_PATH.exists():
+        for model_file in MODELS_PATH.glob("**/*.joblib"):
+            try:
+                # Load model metadata
+                loaded = joblib.load(model_file)
+                
+                model_info = {
+                    "name": model_file.name,
+                    "path": str(model_file.relative_to(MODELS_PATH)),
+                    "size_mb": round(model_file.stat().st_size / (1024 * 1024), 2),
+                }
+                
+                # Extract metadata if available
+                if isinstance(loaded, dict):
+                    model_info["model_type"] = loaded.get("model_type", "unknown")
+                    model_info["year"] = loaded.get("year", "unknown")
+                    model_info["has_meta_stats"] = loaded.get("has_meta_stats", False)
+                    if "train_config" in loaded:
+                        model_info["train_config"] = loaded["train_config"]
+                else:
+                    model_info["model_type"] = "legacy_format"
+                
+                models.append(model_info)
+            except Exception as e:
+                models.append({
+                    "name": model_file.name,
+                    "path": str(model_file.relative_to(MODELS_PATH)),
+                    "error": f"Failed to load: {str(e)}"
+                })
+    
+    return {"models": models, "count": len(models)}
+
+
+@app.get("/models/info")
+def get_model_info(model_name: str):
+    """Get detailed information about a specific model."""
+    if not model_name.endswith(".joblib"):
+        model_name += ".joblib"
+    
+    model_path = MODELS_PATH / model_name
+    if not model_path.exists():
+        return {"status": "failed", "error": f"Model not found: {model_name}"}
+    
+    try:
+        loaded = joblib.load(model_path)
+        
+        info = {
+            "name": model_name,
+            "path": str(model_path),
+            "size_mb": round(model_path.stat().st_size / (1024 * 1024), 2),
+        }
+        
+        if isinstance(loaded, dict):
+            info["model_type"] = loaded.get("model_type", "unknown")
+            info["year"] = loaded.get("year", "unknown")
+            info["months"] = loaded.get("months", [])
+            info["has_meta_stats"] = loaded.get("has_meta_stats", False)
+            info["meta_dir"] = loaded.get("meta_dir", None)
+            info["train_config"] = loaded.get("train_config", {})
+            
+            # Get model class info
+            if "model" in loaded:
+                model_obj = loaded["model"]
+                info["model_class"] = model_obj.__class__.__name__
+        else:
+            info["model_type"] = "legacy_format"
+            info["model_class"] = loaded.__class__.__name__
+        
+        return {"status": "success", "model": info}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+    
+
+
+# @app.post("/train")
+# def start_train(req: TileTrainRequest):
+#     job_id = f"job_{uuid4().hex}"
+#     jobs[job_id] = {
+#         "status": "running",
+#         "job_name": req.job_name,
+#         "algorithm": req.algorithm.value,
+#         "submitted_at": time.time(),
+#     }
+#     payload = req.model_dump()
+#     thread = threading.Thread(target=train_job, args=(job_id, payload), daemon=True)
+#     thread.start()
+#     return {"job_id": job_id, "status": "running"}
+
+# jobs: dict[str, dict] = {}
+
+
+# def train_job(job_id: str, config_name: str):
+#     try:
+#         cfg = load_yaml_config(Path("configs") / f"{config_name}.yaml")
+#         res = train_from_config(cfg, data_root=cfg.get("data", {}).get("root", "data/processed/patches"))
+#         jobs[job_id].update({"status": "completed", **res})
+#     except Exception as e:
+#         jobs[job_id].update({"status": "failed", "error": str(e)})
+
+
+
+
+
+# @app.get("/train/status")
+# def train_status(id: str):
+#     return jobs.get(id, {"status": "unknown"})
+
+# @app.get("/config/{name}")
+# def get_config(name: str) -> Dict:
+#     path = Path("configs") / f"{name}.yaml"
+#     if not path.exists():
+#         return {"error": "config not found"}
+#     return load_yaml_config(path)
+
+
+
+
+
+# class PreviewRequest(BaseModel):
+#     tile_dir: str
+#     bands: list[str] = ["B04", "B03", "B02"]
+#     indices: list[str] = ["NDVI"]
+
+
+# @app.post("/preview")
+# def preview(req: PreviewRequest):
+#     tile_dir = Path(req.tile_dir)
+#     x, mapping = load_s2_stack(tile_dir, list(set(req.bands + ["B04", "B03", "B02"])) )
+#     # RGB using B04,B03,B02
+#     red = x[mapping["B04"]]
+#     green = x[mapping["B03"]]
+#     blue = x[mapping["B02"]]
+#     def stretch(b):
+#         p2, p98 = np.percentile(b, 2), np.percentile(b, 98)
+#         return np.clip((b - p2) / (p98 - p2 + 1e-6), 0, 1)
+#     rgb = np.stack([stretch(red), stretch(green), stretch(blue)], axis=-1)
+#     rgb8 = (rgb * 255).astype(np.uint8)
+
+#     # NDVI
+#     if "NDVI" in req.indices:
+#         x2, mapping2 = load_s2_stack(tile_dir, ["B08", "B04"])  # ensure mapping
+#         nir = x2[mapping2["B08"]]
+#         red = x2[mapping2["B04"]]
+#         ndvi = (nir - red) / (nir + red + 1e-6)
+#         ndvi_img = ((ndvi + 1) / 2 * 255).astype(np.uint8)
+#         ndvi_b64 = np_to_png_b64(ndvi_img)
+#     else:
+#         ndvi_b64 = None
+
+#     return {
+#         "rgb_png": np_to_png_b64(rgb8),
+#         "ndvi_png": ndvi_b64,
+#         "shape": rgb8.shape,
+#     }
+
+
+
+# class PredictRequest(BaseModel):
+#     tile_dir: str
+#     checkpoint: Optional[str] = None
+
+
+# @app.post("/predict")
+# def predict(req: PredictRequest):
+#     # Minimal: load checkpointed model if provided; otherwise error
+#     ckpt = req.checkpoint
+#     if ckpt is None or not Path(ckpt).exists():
+#         return {"error": "checkpoint not found", "ok": False}
+
+#     lit = LitClassifier.load_from_checkpoint(ckpt)
+#     model = lit.model
+#     device = "cuda" if torch.cuda.is_available() else "cpu"
+#     model = model.to(device)
+
+#     # Load tile RGB bands default
+#     x, mapping = load_s2_stack(Path(req.tile_dir), ["B02", "B03", "B04", "B08"])  # + NDVI
+#     x = compute_indices(x, mapping, ["NDVI"])  # channels=5
+
+#     patch_size = 256
+#     stride = 256
+#     H, W = x.shape[1], x.shape[2]
+#     pred_map = np.full((H, W), 255, dtype=np.uint8)
+#     ent_map = np.zeros((H, W), dtype=np.float32)
+#     for r, c, p in extract_patches(x, patch_size, stride):
+#         xt = torch.from_numpy(p).unsqueeze(0).to(device)
+#         res = run_batch(model, xt)
+#         cls = int(res.probs.argmax(axis=1)[0])
+#         ent = float(res.entropy[0])
+#         pred_map[r:r+patch_size, c:c+patch_size] = cls
+#         ent_map[r:r+patch_size, c:c+patch_size] = ent
+
+#     # Scale entropy to 0..255 for quick view
+#     em = ent_map
+#     em = (em - em.min()) / (em.max() - em.min() + 1e-6)
+#     ent_png = np_to_png_b64((em * 255).astype(np.uint8))
+#     pred_png = np_to_png_b64(pred_map.astype(np.uint8))
+#     return {"ok": True, "pred_png": pred_png, "entropy_png": ent_png}
+
+
+# class FinetuneRequest(BaseModel):
+#     checkpoint: str
+#     new_data_root: str = "data/processed/patches"
+#     config_name: str = "option_c_supervised"
+
+
+# def finetune_job(job_id: str, req: FinetuneRequest):
+#     try:
+#         cfg = load_yaml_config(Path("configs") / f"{req.config_name}.yaml")
+#         res = finetune_from_checkpoint(req.checkpoint, cfg, req.new_data_root)
+#         jobs[job_id].update({"status": "completed", **res})
+#     except Exception as e:
+#         jobs[job_id].update({"status": "failed", "error": str(e)})
+
+
+# @app.post("/finetune")
+# def start_finetune(req: FinetuneRequest):
+#     job_id = f"job_{int(time.time())}"
+#     jobs[job_id] = {"status": "running"}
+#     t = threading.Thread(target=finetune_job, args=(job_id, req), daemon=True)
+#     t.start()
+#     return {"job_id": job_id}
+
+
+# @app.get("/metrics")
+# def get_metrics():
+#     # Placeholder: return last job info
+#     return jobs
+>>>>>>> eaed9dfe58e0c94e728f4593693307b31eb519ad

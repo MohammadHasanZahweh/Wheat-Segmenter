@@ -286,7 +286,25 @@ def train_sklearn_model(cfg: TrainConfig) -> dict[str, Any]:
     if cfg.save_model:
         save_path = Path(cfg.save_model)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model, save_path)
+        
+        # Save with metadata for proper normalization during inference
+        save_data = {
+            'model': model,
+            'model_type': cfg.model_type,
+            'year': cfg.year,
+            'months': cfg.months,
+            'meta_dir': cfg.meta_dir if cfg.use_meta_stats else None,
+            'has_meta_stats': cfg.use_meta_stats,
+            'train_config': {
+                'train_fraction': cfg.train_fraction,
+                'test_fraction': cfg.test_fraction,
+                'pixels_per_tile': cfg.pixels_per_tile,
+                'balance_pixels': cfg.balance_pixels,
+                'seed': cfg.seed,
+            }
+        }
+        
+        joblib.dump(save_data, save_path)
         results["model_path"] = str(save_path)
         print(f"Saved model to {save_path}", flush=True)
     

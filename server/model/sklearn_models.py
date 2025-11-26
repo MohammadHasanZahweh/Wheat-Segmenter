@@ -10,12 +10,44 @@ from __future__ import annotations
 import numpy as np
 import joblib
 from pathlib import Path
-from typing import Literal, Any
+from typing import Literal, Any, Dict, Sequence, Optional
 
 from server.model.base_model import AbstractModel
 
 
 ModelType = Literal["xgboost", "histgb", "random_forest", "svm"]
+
+
+def load_meta_stats(meta_dir: Path, year: str, months: Sequence[int]) -> Dict[int, Dict[str, np.ndarray]]:
+    """
+    Load precomputed mean/std statistics from meta directory.
+    
+    Expected structure:
+        meta/<YEAR>_<MONTH>.npz containing 'mean' and 'std' arrays
+    
+    Args:
+        meta_dir: Path to meta directory
+        year: Year string (e.g., '2020')
+        months: Sequence of month integers to load
+    
+    Returns:
+        Dict mapping month -> {'mean': np.ndarray, 'std': np.ndarray}
+    """
+    meta_stats = {}
+    for month in months:
+        npz_path = meta_dir / f"{year}_{month}.npz"
+        if not npz_path.exists():
+            print(f"[WARN] Meta stats not found: {npz_path}, skipping month {month}")
+            continue
+        data = np.load(npz_path)
+        if 'mean' not in data or 'std' not in data:
+            print(f"[WARN] Meta file {npz_path} missing 'mean' or 'std', skipping")
+            continue
+        meta_stats[month] = {
+            'mean': data['mean'].astype(np.float32),
+            'std': data['std'].astype(np.float32)
+        }
+    return meta_stats
 
 
 class SklearnWheatModel(AbstractModel):
@@ -24,19 +56,46 @@ class SklearnWheatModel(AbstractModel):
     
     Wraps XGBoost, HistGradientBoosting, RandomForest, or SVM classifiers
     to work with the AbstractModel interface.
+    
+    Supports normalization for inference using:
+    - Meta statistics (per-month mean/std) 
+    - Per-tile min-max normalization
     """
     
-    def __init__(self, model_type: ModelType = "xgboost", **kwargs):
+    def __init__(self, model_type: ModelType = "xgboost", 
+                 year: str = "2020",
+                 months: Sequence[int] = (11, 12, 1, 2, 3, 4, 5, 6, 7),
+                 meta_dir: Optional[str] = None,
+                 **kwargs):
         """
         Initialize sklearn model.
         
         Args:
             model_type: Type of model ("xgboost", "histgb", "random_forest", "svm")
+            year: Year for loading meta statistics
+            months: Month sequence for temporal data
+            meta_dir: Directory containing meta statistics (if None, uses per-tile normalization)
             **kwargs: Model-specific hyperparameters
         """
         self.model_type = model_type
         self.model = self._create_model(**kwargs)
         self.num_classes = 2  # Binary classification: wheat vs non-wheat
+        
+        # Normalization configuration
+        self.year = year
+        self.months = months
+        self.meta_dir = meta_dir
+        self.meta_stats = None
+        
+        # Load meta statistics if provided
+        if meta_dir:
+            meta_path = Path(meta_dir) / "wheat"
+            if meta_path.exists():
+                self.meta_stats = load_meta_stats(meta_path, self.year, self.months)
+                if self.meta_stats:
+                    print(f"[INFO] Loaded meta stats for {len(self.meta_stats)} months from {meta_path}")
+            else:
+                print(f"[WARN] meta_dir specified but not found: {meta_path}")
         
     def _create_model(self, **kwargs):
         """Create the appropriate sklearn model."""
@@ -97,13 +156,80 @@ class SklearnWheatModel(AbstractModel):
         """Save model to disk using joblib."""
         save_path = Path(path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(self.model, save_path)
+        
+        # Save model along with normalization config
+        save_data = {
+            'model': self.model,
+            'model_type': self.model_type,
+            'year': self.year,
+            'months': self.months,
+            'meta_dir': self.meta_dir,
+            'has_meta_stats': self.meta_stats is not None
+        }
+        joblib.dump(save_data, save_path)
         print(f"Model saved to {save_path}")
     
     def load(self, path: str):
         """Load model from disk."""
-        self.model = joblib.load(path)
+        loaded = joblib.load(path)
+        
+        # Handle both old format (just model) and new format (dict with metadata)
+        if isinstance(loaded, dict) and 'model' in loaded:
+            self.model = loaded['model']
+            self.model_type = loaded.get('model_type', self.model_type)
+            self.year = loaded.get('year', self.year)
+            self.months = loaded.get('months', self.months)
+            self.meta_dir = loaded.get('meta_dir', self.meta_dir)
+            
+            # Reload meta stats if needed
+            if loaded.get('has_meta_stats') and self.meta_dir:
+                meta_path = Path(self.meta_dir) / "wheat"
+                if meta_path.exists():
+                    self.meta_stats = load_meta_stats(meta_path, self.year, self.months)
+        else:
+            # Old format - just the model
+            self.model = loaded
+        
         print(f"Model loaded from {path}")
+    
+    def _normalize_patch(self, array: np.ndarray) -> np.ndarray:
+        """
+        Normalize a patch using meta stats or per-tile normalization.
+        
+        Args:
+            array: Shape (T, B, H, W) - temporal, bands, height, width
+        
+        Returns:
+            Normalized array with same shape
+        """
+        T, B, H, W = array.shape
+        out = array.copy()
+        
+        # Use meta statistics (per-month normalization)
+        if self.meta_stats:
+            for t, month in enumerate(self.months[:T]):  # Only use available months
+                if month not in self.meta_stats:
+                    continue
+                mean = self.meta_stats[month]['mean']
+                std = self.meta_stats[month]['std']
+                # Ensure we don't exceed available bands
+                num_bands_to_norm = min(B, len(mean))
+                for b in range(num_bands_to_norm):
+                    s = std[b] if std[b] > 0 else 1.0
+                    out[t, b] = (out[t, b] - mean[b]) / s
+            return out
+        
+        # Fallback: per-tile min-max normalization per band across time
+        for b in range(B):
+            band = out[:, b]
+            vmin = np.nanmin(band)
+            vmax = np.nanmax(band)
+            if vmax > vmin:
+                out[:, b] = (band - vmin) / (vmax - vmin)
+            else:
+                out[:, b] = 0.0
+        
+        return out
     
     def predict_pixel(self, array: np.ndarray) -> np.ndarray:
         """
@@ -130,17 +256,23 @@ class SklearnWheatModel(AbstractModel):
         else:
             return self.model.predict(array).astype(np.uint8)
     
-    def predict_patch(self, array: np.ndarray) -> np.ndarray:
+    def predict_patch(self, array: np.ndarray, normalize: bool = True) -> np.ndarray:
         """
         Predict wheat for entire patch/tile.
         
         Args:
             array: Shape (T, B, H, W) - temporal, bands, height, width
+            normalize: Whether to normalize the input (default True)
         
         Returns:
             Shape (H, W) binary prediction mask
         """
         T, B, H, W = array.shape
+        
+        # Normalize if requested
+        if normalize:
+            array = self._normalize_patch(array)
+        
         # Reshape to (H*W, T*B)
         pixels = array.reshape(T * B, H * W).T  # (H*W, T*B)
         
@@ -233,32 +365,61 @@ class SklearnWheatModel(AbstractModel):
         return self.val_pixel_dataset(dataset, prefix="eval_")
 
 
-def load_model(path: str) -> SklearnWheatModel:
+def load_model(path: str, meta_dir: Optional[str] = None, 
+                year: str = "2020", 
+                months: Sequence[int] = (11, 12, 1, 2, 3, 4, 5, 6, 7)) -> SklearnWheatModel:
     """
     Load a trained sklearn wheat model from disk.
     
     Args:
         path: Path to .joblib file
+        meta_dir: Optional path to meta statistics directory for normalization
+        year: Year for meta statistics (if meta_dir provided)
+        months: Month sequence for meta statistics (if meta_dir provided)
     
     Returns:
         SklearnWheatModel instance with loaded model
     """
-    raw_model = joblib.load(path)
+    loaded = joblib.load(path)
     
-    # Detect model type
-    model_type = "xgboost"  # Default
-    if hasattr(raw_model, '__class__'):
-        class_name = raw_model.__class__.__name__
-        if 'HistGradient' in class_name:
-            model_type = "histgb"
-        elif 'RandomForest' in class_name:
-            model_type = "random_forest"
-        elif 'Pipeline' in class_name or 'SVC' in class_name:
-            model_type = "svm"
-    
-    # Create wrapper
-    wrapper = SklearnWheatModel(model_type=model_type)
-    wrapper.model = raw_model
+    # Handle both old format (just model) and new format (dict with metadata)
+    if isinstance(loaded, dict) and 'model' in loaded:
+        # New format with metadata
+        raw_model = loaded['model']
+        model_type = loaded.get('model_type', 'xgboost')
+        saved_year = loaded.get('year', year)
+        saved_months = loaded.get('months', months)
+        saved_meta_dir = loaded.get('meta_dir', meta_dir)
+        
+        # Create wrapper with saved configuration
+        wrapper = SklearnWheatModel(
+            model_type=model_type,
+            year=saved_year,
+            months=saved_months,
+            meta_dir=saved_meta_dir or meta_dir  # Allow override
+        )
+        wrapper.model = raw_model
+    else:
+        # Old format - just the model, detect type
+        raw_model = loaded
+        model_type = "xgboost"  # Default
+        if hasattr(raw_model, '__class__'):
+            class_name = raw_model.__class__.__name__
+            if 'HistGradient' in class_name:
+                model_type = "histgb"
+            elif 'RandomForest' in class_name:
+                model_type = "random_forest"
+            elif 'Pipeline' in class_name or 'SVC' in class_name:
+                model_type = "svm"
+        
+        # Create wrapper with provided configuration
+        wrapper = SklearnWheatModel(
+            model_type=model_type,
+            year=year,
+            months=months,
+            meta_dir=meta_dir
+        )
+        wrapper.model = raw_model
     
     return wrapper
 
