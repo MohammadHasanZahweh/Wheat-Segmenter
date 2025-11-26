@@ -9,12 +9,12 @@ def inject_global_styles() -> None:
         """
         <style>
         :root {
-            --bg1: #0a1526;
-            --bg2: #07101d;
-            --panel: rgba(11, 20, 34, 0.9);
-            --accent: #5ee6a0;
-            --accent-2: #74f1ff;
-            --border: rgba(115, 161, 255, 0.3);
+            --bg1: #0b0f1f;
+            --bg2: #0a1329;
+            --panel: rgba(12, 18, 32, 0.94);
+            --accent: #ff5f6d;
+            --accent-2: #ffc371;
+            --border: rgba(255, 99, 132, 0.35);
         }
         .stApp, [data-testid="stAppViewContainer"] {
             background: linear-gradient(160deg, var(--bg1) 0%, var(--bg2) 50%, #050915 100%);
@@ -57,6 +57,18 @@ def inject_global_styles() -> None:
             font-size: 1rem;
             margin-bottom: 0.5rem;
             color: var(--accent);
+        }
+        [data-testid="stSidebar"] .stButton button {
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: linear-gradient(120deg, rgba(255,95,109,0.9), rgba(255,195,113,0.9));
+            color: #0b0f1f;
+            font-weight: 600;
+        }
+        [data-testid="stSidebar"] .stButton button:disabled {
+            background: rgba(255,255,255,0.08);
+            color: #8a94a7;
+            border-color: rgba(255,255,255,0.08);
         }
         .metrics-row {
             padding: 0.75rem 1rem 0.25rem 1rem;
@@ -104,17 +116,17 @@ def legend_html() -> str:
             width: 220px;
             background: rgba(11, 20, 34, 0.9);
             color: #e2e8f0;
-            border: 1px solid rgba(115,161,255,0.3);
+            border: 1px solid rgba(255,99,132,0.35);
             z-index: 9999;
             font-size: 13px;
             padding: 10px;
             border-radius: 8px;
             box-shadow: 0 10px 20px rgba(0,0,0,0.35);">
-            <p style="margin:0; font-weight:bold;">🌾 Wheat Coverage Legend</p>
-            <p style="margin:5px 0;"><span style="background-color:#00FF00; padding:2px 10px;">■</span> Very High (>70%)</p>
-            <p style="margin:5px 0;"><span style="background-color:#7FFF00; padding:2px 10px;">■</span> High (50–70%)</p>
-            <p style="margin:5px 0;"><span style="background-color:#FFFF00; padding:2px 10px;">■</span> Medium (30–50%)</p>
-            <p style="margin:5px 0;"><span style="background-color:#FFA500; padding:2px 10px;">■</span> Low (10–30%)</p>
-            <p style="margin:5px 0;"><span style="background-color:#FF0000; padding:2px 10px;">■</span> Very Low (<10%)</p>
+            <p style="margin:0; font-weight:bold;">Wheat Coverage Legend</p>
+            <p style="margin:5px 0;"><span style="display:inline-block; background-color:#00FF00; padding:2px 10px; border-radius:4px;">&nbsp;</span> Very High (>70%)</p>
+            <p style="margin:5px 0;"><span style="display:inline-block; background-color:#7FFF00; padding:2px 10px; border-radius:4px;">&nbsp;</span> High (50–70%)</p>
+            <p style="margin:5px 0;"><span style="display:inline-block; background-color:#FFFF00; padding:2px 10px; border-radius:4px;">&nbsp;</span> Medium (30–50%)</p>
+            <p style="margin:5px 0;"><span style="display:inline-block; background-color:#FFA500; padding:2px 10px; border-radius:4px;">&nbsp;</span> Low (10–30%)</p>
+            <p style="margin:5px 0;"><span style="display:inline-block; background-color:#FF0000; padding:2px 10px; border-radius:4px;">&nbsp;</span> Very Low (<10%)</p>
         </div>
     """

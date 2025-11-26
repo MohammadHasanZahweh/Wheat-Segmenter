@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Tuple
@@ -10,12 +10,6 @@ from apps.streamlit_app.core.geo import parse_regions
 
 @dataclass
 class SidebarConfig:
-    model_path: str
-    prob_th: float
-    pixels_cap: int
-    root: str
-    year: str
-    months_sequence: Tuple[int, ...]
     api_url: str
     job_name: str
     algorithm: str
@@ -28,38 +22,49 @@ class SidebarConfig:
     start_training: bool
     refresh_training: bool
     clear_training: bool
-    load_clicked: bool
     balance_pixels: bool
     pixels_per_tile: int
     train_fraction: float
     test_fraction: float
+    root: str
+    year: str
+    months_sequence: Tuple[int, ...]
+    project_name: str
+    region_name: str
+    model_name: str
+    save_name: str
+    inference_year: int
+    start_inference: bool
+    refresh_inference: bool
+    fetch_result: bool
 
 
 def render_sidebar(app_cfg) -> SidebarConfig:
-    st.sidebar.header("⚙️ Configuration")
+    st.sidebar.header("Configuration")
 
-    # Pull settings from session (set in Settings page)
     settings = st.session_state.get(
         "settings",
         {
-            "model_path": "runs/xgb_2020.joblib",
-            "prob_th": 0.5,
-            "pixels_cap": 2000,
             "root": app_cfg.root,
             "year": app_cfg.year,
             "months_text": " ".join(map(str, app_cfg.months)),
             "use_meta_stats": True,
             "meta_dir": "./meta",
+            "project_name": app_cfg.root,
+            "region_name": "region_0",
+            "model_name": "xgb_2020.joblib",
+            "save_name": "latest_run.tiff",
         },
     )
-    model_path = settings.get("model_path", "")
-    prob_th = float(settings.get("prob_th", 0.5))
-    pixels_cap = int(settings.get("pixels_cap", 2000))
     root = settings.get("root", app_cfg.root)
     year = settings.get("year", app_cfg.year)
     months_text = settings.get("months_text", " ".join(map(str, app_cfg.months)))
     use_meta_stats = bool(settings.get("use_meta_stats", True))
     meta_dir = settings.get("meta_dir", "./meta")
+    project_name = settings.get("project_name", root)
+    region_name = settings.get("region_name", "region_0")
+    model_name = settings.get("model_name", "xgb_2020.joblib")
+    save_name = settings.get("save_name", "latest_run.tiff")
 
     if months_text.strip():
         try:
@@ -73,10 +78,34 @@ def render_sidebar(app_cfg) -> SidebarConfig:
         st.session_state["train_job_id"] = None
     if "train_job_status" not in st.session_state:
         st.session_state["train_job_status"] = None
+    if "inference_job_id" not in st.session_state:
+        st.session_state["inference_job_id"] = None
+    if "inference_status" not in st.session_state:
+        st.session_state["inference_status"] = None
+    if "inference_result_b64" not in st.session_state:
+        st.session_state["inference_result_b64"] = None
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown('<div class="sidebar-title">🧠 Train Model via API</div>', unsafe_allow_html=True)
+    st.sidebar.markdown('<div class="sidebar-title">API</div>', unsafe_allow_html=True)
     api_url = st.sidebar.text_input("API base URL", value="http://127.0.0.1:8000")
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown('<div class="sidebar-title">Inference (server)</div>', unsafe_allow_html=True)
+    project_name_input = st.sidebar.text_input("Project name", value=project_name)
+    region_name_input = st.sidebar.text_input("Region name", value=region_name)
+    model_name_input = st.sidebar.text_input("Model (.joblib)", value=model_name)
+    save_name_input = st.sidebar.text_input("Result name (.tiff)", value=save_name)
+    inference_year = st.sidebar.number_input("Year", min_value=2000, max_value=2100, value=int(year), step=1)
+    start_inference = st.sidebar.button("Start Inference Job", use_container_width=True)
+    refresh_inference = st.sidebar.button(
+        "Refresh Inference Status",
+        use_container_width=True,
+        disabled=not bool(st.session_state.get("inference_job_id")),
+    )
+    fetch_result = st.sidebar.button("Fetch Result Image", use_container_width=True)
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown('<div class="sidebar-title">Train Model via API</div>', unsafe_allow_html=True)
     job_name = st.sidebar.text_input("Job name", value="streamlit_job")
     algo_labels = {
         "xgboost": "XGBoost",
@@ -107,9 +136,15 @@ def render_sidebar(app_cfg) -> SidebarConfig:
         if algorithm == "xgboost":
             xgb_estimators = st.number_input("n_estimators", min_value=10, value=400, step=10, key="xgb_estimators")
             xgb_depth = st.number_input("max_depth", min_value=1, value=8, step=1, key="xgb_depth")
-            xgb_lr = st.number_input("learning_rate", min_value=0.001, max_value=1.0, value=0.05, step=0.01, format="%.3f", key="xgb_lr")
-            xgb_subsample = st.number_input("subsample", min_value=0.1, max_value=1.0, value=0.8, step=0.05, format="%.2f", key="xgb_subsample")
-            xgb_colsample = st.number_input("colsample_bytree", min_value=0.1, max_value=1.0, value=0.8, step=0.05, format="%.2f", key="xgb_colsample")
+            xgb_lr = st.number_input(
+                "learning_rate", min_value=0.001, max_value=1.0, value=0.05, step=0.01, format="%.3f", key="xgb_lr"
+            )
+            xgb_subsample = st.number_input(
+                "subsample", min_value=0.1, max_value=1.0, value=0.8, step=0.05, format="%.2f", key="xgb_subsample"
+            )
+            xgb_colsample = st.number_input(
+                "colsample_bytree", min_value=0.1, max_value=1.0, value=0.8, step=0.05, format="%.2f", key="xgb_colsample"
+            )
             model_params = {
                 "n_estimators": int(xgb_estimators),
                 "max_depth": int(xgb_depth),
@@ -120,7 +155,9 @@ def render_sidebar(app_cfg) -> SidebarConfig:
         elif algorithm == "hist_gradient_boosting":
             hgb_depth = st.number_input("max_depth (0=None)", min_value=0, value=8, step=1, key="hgb_depth")
             hgb_iter = st.number_input("max_iter", min_value=10, value=400, step=10, key="hgb_iter")
-            hgb_lr = st.number_input("learning_rate", min_value=0.001, max_value=1.0, value=0.05, step=0.01, format="%.3f", key="hgb_lr")
+            hgb_lr = st.number_input(
+                "learning_rate", min_value=0.001, max_value=1.0, value=0.05, step=0.01, format="%.3f", key="hgb_lr"
+            )
             hgb_l2 = st.number_input("l2_regularization", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="hgb_l2")
             model_params = {
                 "max_depth": int(hgb_depth),
@@ -145,25 +182,21 @@ def render_sidebar(app_cfg) -> SidebarConfig:
                 "svm_gamma": svm_gamma.strip() or "scale",
             }
 
-    start_training = st.sidebar.button("🚀 Start Training Job", use_container_width=True)
+    start_training = st.sidebar.button("Start Training Job", use_container_width=True)
     refresh_training = st.sidebar.button(
-        "🔁 Refresh Job Status",
+        "Refresh Job Status",
         use_container_width=True,
         disabled=not bool(st.session_state.get("train_job_id")),
     )
     clear_training = st.sidebar.button(
-        "🗑 Clear Job Info",
+        "Clear Job Info",
         use_container_width=True,
         disabled=not bool(st.session_state.get("train_job_id")),
     )
-    load_clicked = st.sidebar.button("🔄 Load Dataset & Model", type="primary", use_container_width=True)
-    if load_clicked:
-        for key in ("results_data", "results_selected", "results_tiles_idx"):
-            st.session_state.pop(key, None)
 
     dataset_cfg = {
-        "root": root,
-        "year": year,
+        "project_name": project_name_input,
+        "year": int(inference_year),
         "regions": parse_regions(regions_text),
         "months": list(months_sequence),
         "train_fraction": float(train_fraction),
@@ -171,18 +204,12 @@ def render_sidebar(app_cfg) -> SidebarConfig:
         "pixels_per_tile": int(pixels_per_tile),
         "balance_pixels": bool(balance_pixels),
         "seed": int(seed),
+        "normalize": True,
     }
     if use_meta_stats:
-        dataset_cfg["use_meta_stats"] = True
         dataset_cfg["meta_dir"] = meta_dir.strip() or "./meta"
 
     return SidebarConfig(
-        model_path=model_path,
-        prob_th=prob_th,
-        pixels_cap=int(pixels_cap),
-        root=root,
-        year=year,
-        months_sequence=months_sequence,
         api_url=api_url.rstrip("/"),
         job_name=job_name,
         algorithm=algorithm,
@@ -195,9 +222,19 @@ def render_sidebar(app_cfg) -> SidebarConfig:
         start_training=start_training,
         refresh_training=refresh_training,
         clear_training=clear_training,
-        load_clicked=load_clicked,
         balance_pixels=balance_pixels,
         pixels_per_tile=int(pixels_per_tile),
         train_fraction=float(train_fraction),
         test_fraction=float(test_fraction),
+        root=root,
+        year=str(inference_year),
+        months_sequence=months_sequence,
+        project_name=project_name_input,
+        region_name=region_name_input,
+        model_name=model_name_input,
+        save_name=save_name_input,
+        inference_year=int(inference_year),
+        start_inference=start_inference,
+        refresh_inference=refresh_inference,
+        fetch_result=fetch_result,
     )

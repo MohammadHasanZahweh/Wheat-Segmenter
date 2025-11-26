@@ -15,7 +15,6 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from apps.streamlit_app.core.api_client import TrainAPI
-from apps.streamlit_app.core.loaders import load_dataset, load_model
 from apps.streamlit_app.ui.pages import (
     render_config_select,
     render_instructions,
@@ -83,6 +82,69 @@ def handle_training_actions(api_url: str, sidebar_cfg: SidebarConfig):
         training_feedback.info("Cleared stored job info.")
 
 
+def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
+    inference_feedback = st.sidebar.empty()
+    client = TrainAPI(api_url)
+
+    base_request = {
+        "region_name": sidebar_cfg.region_name,
+        "project_name": sidebar_cfg.project_name,
+        "model_name": sidebar_cfg.model_name,
+        "year": int(sidebar_cfg.inference_year),
+        "save_name": sidebar_cfg.save_name,
+    }
+
+    if sidebar_cfg.start_inference:
+        if not client.base:
+            inference_feedback.error("Provide a valid API base URL.")
+        elif not sidebar_cfg.region_name or not sidebar_cfg.project_name or not sidebar_cfg.model_name:
+            inference_feedback.error("Project, region, and model name are required.")
+        else:
+            try:
+                data = client.start_inference(base_request)
+                job_id = data.get("job_id")
+                if not job_id:
+                    raise ValueError(f"Unexpected response: {data}")
+                st.session_state["inference_job_id"] = job_id
+                st.session_state["inference_request"] = base_request
+                st.session_state["inference_status"] = {"status": data.get("status", "running"), **data}
+                st.session_state["inference_result_b64"] = None
+                st.session_state["inference_last_result_name"] = base_request["save_name"]
+                inference_feedback.success(f"Inference job started with id {job_id}")
+            except requests.RequestException as exc:
+                inference_feedback.error(f"Failed to start inference: {exc}")
+            except Exception as exc:
+                inference_feedback.error(f"Unexpected error: {exc}")
+
+    if sidebar_cfg.refresh_inference and st.session_state.get("inference_job_id"):
+        try:
+            status_data = client.status(st.session_state["inference_job_id"])
+            st.session_state["inference_status"] = status_data
+            inference_feedback.info(f"Inference status: {status_data.get('status', 'unknown')}")
+        except requests.RequestException as exc:
+            inference_feedback.error(f"Failed to fetch inference status: {exc}")
+
+    if sidebar_cfg.fetch_result:
+        req = st.session_state.get("inference_request") or base_request
+        project = req.get("project_name") or sidebar_cfg.project_name
+        run_name = req.get("save_name") or sidebar_cfg.save_name
+        if not project or not run_name:
+            inference_feedback.error("Project and result name are required to fetch results.")
+        else:
+            try:
+                result = client.fetch_result(project, run_name)
+                st.session_state["inference_status"] = {"status": result.get("status")}
+                image_b64 = result.get("image_base64")
+                if image_b64:
+                    st.session_state["inference_result_b64"] = image_b64
+                    st.session_state["inference_last_result_name"] = run_name
+                    inference_feedback.success(f"Fetched result for {project}/{run_name}")
+                else:
+                    inference_feedback.warning(result.get("status", "Result not ready yet"))
+            except requests.RequestException as exc:
+                inference_feedback.error(f"Failed to fetch result image: {exc}")
+
+
 def main_streamlit(app_cfg: AppConfig) -> None:
     st.set_page_config(page_title="Wheat Map (Lebanon)", layout="wide")
     inject_global_styles()
@@ -96,7 +158,7 @@ def main_streamlit(app_cfg: AppConfig) -> None:
         unsafe_allow_html=True,
     )
 
-    nav_options = ["Welcome", "Instructions", "Settings", "Configure & Select Region", "Results & Analysis"]
+    nav_options = ["Welcome", "Instructions", "Settings", "Inference", "Results"]
     if "nav" not in st.session_state:
         st.session_state["nav"] = nav_options[0]
 
@@ -105,14 +167,14 @@ def main_streamlit(app_cfg: AppConfig) -> None:
         <style>
         .nav-row button[kind=\"secondary\"] {
             border-radius: 999px;
-            background: rgba(255,255,255,0.06);
-            border: 1px solid rgba(115,161,255,0.3);
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,99,132,0.35);
             color: #e2e8f0;
         }
         .nav-row button[kind=\"primary\"] {
             border-radius: 999px;
-            background: linear-gradient(120deg, #74f1ff, #5ee6a0);
-            color: #0a1526;
+            background: linear-gradient(120deg, #ff5f6d, #ffc371);
+            color: #0a0f1f;
             border: 0;
         }
         </style>
@@ -136,26 +198,19 @@ def main_streamlit(app_cfg: AppConfig) -> None:
 
     sidebar_cfg = render_sidebar(app_cfg)
     handle_training_actions(sidebar_cfg.api_url, sidebar_cfg)
+    handle_inference_actions(sidebar_cfg.api_url, sidebar_cfg)
     render_training_jobs(sidebar_cfg.api_url)
 
-    if "model" not in st.session_state or sidebar_cfg.load_clicked:
-        st.session_state["model"] = load_model(sidebar_cfg.model_path)
-
-    if "dataset" not in st.session_state or sidebar_cfg.load_clicked:
-        ds, tiles_index = load_dataset(sidebar_cfg.root, sidebar_cfg.year, sidebar_cfg.months_sequence)
-        st.session_state["dataset"] = ds
-        st.session_state["tiles_index"] = tiles_index
-
     st.sidebar.markdown("---")
-    st.sidebar.markdown('<div class="sidebar-title">?? Status</div>', unsafe_allow_html=True)
-    model_status = "? Loaded" if st.session_state.get("model") is not None else "? Not loaded"
-    dataset_status = "? Loaded" if st.session_state.get("dataset") is not None else "? Not loaded"
-    tiles_count = len(st.session_state.get("tiles_index", []))
+    st.sidebar.markdown('<div class="sidebar-title">Status</div>', unsafe_allow_html=True)
+    train_job = st.session_state.get("train_job_status") or {}
+    inference_job = st.session_state.get("inference_status") or {}
+    train_status = train_job.get("status", "not started")
+    inference_status = inference_job.get("status", "not started")
     st.sidebar.markdown(
         f"""
-        - **Model:** {model_status}  
-        - **Dataset:** {dataset_status}  
-        - **Tiles with bounds:** {tiles_count}
+        - **Train job:** {train_status}  
+        - **Inference job:** {inference_status}
         """
     )
 
@@ -168,25 +223,11 @@ def main_streamlit(app_cfg: AppConfig) -> None:
     if nav == "Settings":
         render_settings()
         return
-    if nav == "Configure & Select Region":
-        render_config_select(
-            sidebar_cfg=sidebar_cfg,
-            model=st.session_state.get("model"),
-            ds=st.session_state.get("dataset"),
-            tiles_idx=st.session_state.get("tiles_index", []),
-        )
+    if nav == "Inference":
+        render_config_select(sidebar_cfg=sidebar_cfg)
         return
-    if nav == "Results & Analysis":
-        cover_rows = st.session_state.get("results_data")
-        if not cover_rows:
-            st.warning("No results yet. Run inference in **2?? Configure & Select Region** first.")
-            return
-        render_results(
-            sidebar_cfg=sidebar_cfg,
-            cover_rows=cover_rows,
-            tiles_idx=st.session_state.get("results_tiles_idx", []),
-            year=sidebar_cfg.year,
-        )
+    if nav == "Results":
+        render_results(sidebar_cfg=sidebar_cfg)
 
 
 def parse_cli() -> AppConfig:
