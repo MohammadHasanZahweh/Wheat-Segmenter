@@ -16,9 +16,13 @@ import streamlit as st
 from folium.plugins import Draw
 from matplotlib import cm
 import matplotlib.pyplot as plt
+from PIL import ImageFile
 from shapely.geometry import shape
 from streamlit_folium import st_folium
 from apps.streamlit_app.core.geo import bounds_to_polygon
+
+# Allow display of partial TIFFs without crashing
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 def _load_raster_bounds(data_root: Path, region_name: str, year: int) -> List[Dict[str, Any]]:
@@ -131,11 +135,12 @@ def render_instructions():
     st.markdown(
         """
         ## Instructions
-        1. Set the API base URL in the sidebar.
-        2. Fill inference fields (project name, region, model file, result name, year).
-        3. Click **Start Inference Job**; then use **Refresh Inference Status** and **Fetch Result Image**.
-        4. To train, fill the training section in the sidebar and start a training job.
-        5. Use the **Results** tab to view/download the latest fetched inference image.
+        1. Start the API server (uvicorn) and note its URL (default `http://127.0.0.1:8000`).
+        2. In the sidebar, set the API URL and fill inference fields: project name (folder under `/runs`), model filename (.joblib), result name (.tiff), and year.
+        3. Draw your area on the **Inference** map (latest drawing is sent as the geometry mask).
+        4. Click **Start Inference Job**, then **Refresh Inference Status** until it completes, and **Fetch Result Image** to pull it.
+        5. In **Results**, view/download the image and see the map overlay/stats. The app looks for the saved TIFF under `RESULTS_DIR/<project>/<result_name>`.
+        6. If running in Docker, ensure the API container can see your data/models/results via mounts and set `RESULTS_DIR` in the UI container to the same mounted path.
         """
     )
 
@@ -270,8 +275,10 @@ def render_results(sidebar_cfg):
         st.error(f"Failed to decode image: {exc}")
         return
 
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
     st.markdown(f"**Project:** {project} | **Result file:** {run_name}")
-    st.image(image_bytes, caption="Inference result", use_column_width=True)
+    # Fall back to default sizing for wider Streamlit version compatibility
+    st.image(image_bytes, caption="Inference result")
     st.download_button(
         "Download result image",
         data=image_bytes,
@@ -281,7 +288,8 @@ def render_results(sidebar_cfg):
     )
 
     # Map overlay + simple stats from saved TIFF if available on disk
-    results_root = Path(os.environ.get("RESULTS_DIR", "./results"))
+    default_results = Path(__file__).resolve().parents[2] / "results"
+    results_root = Path(os.environ.get("RESULTS_DIR", default_results))
     tiff_path = results_root / project / (run_name if run_name.endswith(".tiff") or run_name.endswith(".tif") else f"{run_name}.tiff")
     if tiff_path.exists():
         try:
