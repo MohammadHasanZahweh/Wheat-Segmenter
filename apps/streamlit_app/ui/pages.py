@@ -15,6 +15,7 @@ import requests
 import streamlit as st
 from folium.plugins import Draw
 from matplotlib import cm
+import matplotlib.pyplot as plt
 from shapely.geometry import shape
 from streamlit_folium import st_folium
 from apps.streamlit_app.core.geo import bounds_to_polygon
@@ -279,7 +280,7 @@ def render_results(sidebar_cfg):
         use_container_width=True,
     )
 
-    # Map overlay from saved TIFF if available on disk
+    # Map overlay + simple stats from saved TIFF if available on disk
     results_root = Path(os.environ.get("RESULTS_DIR", "./results"))
     tiff_path = results_root / project / (run_name if run_name.endswith(".tiff") or run_name.endswith(".tif") else f"{run_name}.tiff")
     if tiff_path.exists():
@@ -287,6 +288,22 @@ def render_results(sidebar_cfg):
             with rasterio.open(tiff_path) as src:
                 arr = src.read(1)
                 bounds = src.bounds
+
+            pos = int(np.count_nonzero(arr > 0))
+            total = int(arr.size)
+            pct = (pos / total * 100) if total else 0
+            st.markdown(f"**Pixels predicted as wheat:** {pos:,} / {total:,} ({pct:.2f}%)")
+
+            # Simple histogram of prediction values (>0)
+            vals = arr[arr > 0]
+            if vals.size:
+                fig, ax = plt.subplots(figsize=(4, 3))
+                ax.hist(vals.flatten(), bins=20, color="#22c55e", alpha=0.9)
+                ax.set_title("Prediction value distribution")
+                ax.set_xlabel("Value")
+                ax.set_ylabel("Count")
+                st.pyplot(fig, use_container_width=True)
+
             # Colorize: green where prediction > 0, transparent elsewhere
             alpha = np.where(arr > 0, 0.85, 0.0).astype(np.float32)
             rgba = np.zeros((*arr.shape, 4), dtype=np.float32)
