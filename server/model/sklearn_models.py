@@ -194,7 +194,7 @@ class SklearnWheatModel(AbstractModel):
     
     def _normalize_patch(self, array: np.ndarray) -> np.ndarray:
         """
-        Normalize a patch using meta stats or per-tile normalization.
+        Normalize a patch using global mean/std computed during training.
         
         Args:
             array: Shape (T, B, H, W) - temporal, bands, height, width
@@ -202,34 +202,15 @@ class SklearnWheatModel(AbstractModel):
         Returns:
             Normalized array with same shape
         """
-        T, B, H, W = array.shape
-        out = array.copy()
-        
-        # Use meta statistics (per-month normalization)
-        if self.meta_stats:
-            for t, month in enumerate(self.months[:T]):  # Only use available months
-                if month not in self.meta_stats:
-                    continue
-                mean = self.meta_stats[month]['mean']
-                std = self.meta_stats[month]['std']
-                # Ensure we don't exceed available bands
-                num_bands_to_norm = min(B, len(mean))
-                for b in range(num_bands_to_norm):
-                    s = std[b] if std[b] > 0 else 1.0
-                    out[t, b] = (out[t, b] - mean[b]) / s
-            return out
-        
-        # Fallback: per-tile min-max normalization per band across time
-        for b in range(B):
-            band = out[:, b]
-            vmin = np.nanmin(band)
-            vmax = np.nanmax(band)
-            if vmax > vmin:
-                out[:, b] = (band - vmin) / (vmax - vmin)
-            else:
-                out[:, b] = 0.0
-        
-        return out
+        # Use global mean/std (matching training normalization)
+        if self.mean.size > 1 and self.std.size > 1:
+            # Reshape mean and std to (T, B, 1, 1) for broadcasting
+            mean_reshaped = self.mean.reshape(self.mean.shape[0], self.mean.shape[1], 1, 1)
+            std_reshaped = self.std.reshape(self.std.shape[0], self.std.shape[1], 1, 1)
+            return (array - mean_reshaped) / std_reshaped
+        else:
+            # No normalization if mean/std not computed
+            return array
     
     def predict_pixel(self, array: np.ndarray) -> np.ndarray:
         """
@@ -399,6 +380,10 @@ def load_model(path: str, meta_dir: Optional[str] = None,
             meta_dir=saved_meta_dir or meta_dir  # Allow override
         )
         wrapper.model = raw_model
+        
+        # Restore normalization statistics
+        wrapper.mean = np.array(loaded.get('mean', [0]), dtype=np.float32)
+        wrapper.std = np.array(loaded.get('std', [1]), dtype=np.float32)
     else:
         # Old format - just the model, detect type
         raw_model = loaded
