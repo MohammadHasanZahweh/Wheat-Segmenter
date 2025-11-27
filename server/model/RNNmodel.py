@@ -183,22 +183,26 @@ class RNNPixelPatchModel(AbstractModel):
         X_list = []
         y_list = []
 
-        for X, Y in dataset:
-            print(X.shape)
-            print(X.shape)
-            print(X.shape)
-            print(X.shape)
+        for X, Y, v in dataset:
+            X = X.detach().cpu().numpy()
+            Y = Y.detach().cpu().numpy()
+            v = v.detach().cpu().numpy()
+            # print(X.shape)
+            # print(X.shape)
+            # print(X.shape)
+            # print(v.dtype)
+            # print(v.min(), v.max())
+            # print(v)
+
             k, _, _, H, W = X.shape
 
             # flatten all spatial pixels
-            X_flat = X.reshape(k, 9 , 13, H * W).transpose(0, 3, 1,2).reshape(-1, 9 , 13)
+            X_flat = X.reshape(k, 9 , 13, H * W).transpose(0, 3, 1, 2).reshape(-1, 9 , 13)
             Y_flat = Y.reshape(-1)
+            v_flat = v.reshape(-1) != 1
 
-            X_list.append(X_flat)
-            y_list.append(Y_flat)
-
-        X_train = np.concatenate(X_list)
-        y_train = np.concatenate(y_list)
+            X_list.append(X_flat[v_flat])
+            y_list.append(Y_flat[v_flat])
 
         # build net if needed
         if self.net is None:

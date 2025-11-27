@@ -29,14 +29,7 @@ services:
       context: ./apps
     ports:
       - "8501:8501"
-    # volumes:
-    #   - ../data:/data
-    #   - ../runs:/runs
-    #   - ../results:/results
     environment:
-      # - DATA_DIR=/data
-      # - RUNS_DIR=/runs
-      # - RESULTS_DIR=/results
       - API_URL=http://api:8000
     depends_on:
       - api
