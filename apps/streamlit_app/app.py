@@ -15,14 +15,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from apps.streamlit_app.core.api_client import TrainAPI
-from apps.streamlit_app.ui.pages import (
-    render_config_select,
-    render_instructions,
-    render_settings,
-    render_results,
-    render_training_jobs,
-    render_welcome,
-)
+from apps.streamlit_app.ui.pages import render_config_select, render_instructions, render_results, render_welcome
 from apps.streamlit_app.ui.sidebar import SidebarConfig, render_sidebar
 from apps.streamlit_app.ui.styles import inject_global_styles
 
@@ -87,23 +80,22 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
     client = TrainAPI(api_url)
 
     base_request = {
-        "region_name": sidebar_cfg.region_name,
         "project_name": sidebar_cfg.project_name,
         "model_name": sidebar_cfg.model_name,
         "year": int(sidebar_cfg.inference_year),
         "save_name": sidebar_cfg.save_name,
     }
-    if st.session_state.get("inference_geometries"):
-        base_request["geometries"] = st.session_state["inference_geometries"]
+    if st.session_state.get("inference_geometry"):
+        base_request["geometry"] = st.session_state["inference_geometry"]
 
     if sidebar_cfg.start_inference:
         if not client.base:
             inference_feedback.error("Provide a valid API base URL.")
-        elif not sidebar_cfg.region_name or not sidebar_cfg.project_name or not sidebar_cfg.model_name:
-            inference_feedback.error("Project, region, and model name are required.")
+        elif not sidebar_cfg.project_name or not sidebar_cfg.model_name:
+            inference_feedback.error("Project and model name are required.")
         else:
             try:
-                data = client.start_inference(base_request)
+                data = client.start_inference_lebanon(base_request)
                 job_id = data.get("job_id")
                 if not job_id:
                     raise ValueError(f"Unexpected response: {data}")
@@ -160,7 +152,7 @@ def main_streamlit(app_cfg: AppConfig) -> None:
         unsafe_allow_html=True,
     )
 
-    nav_options = ["Welcome", "Instructions", "Settings", "Inference", "Results"]
+    nav_options = ["Welcome", "Instructions", "Inference", "Results"]
     if "nav" not in st.session_state:
         st.session_state["nav"] = nav_options[0]
 
@@ -199,19 +191,14 @@ def main_streamlit(app_cfg: AppConfig) -> None:
     nav = st.session_state["nav"]
 
     sidebar_cfg = render_sidebar(app_cfg)
-    handle_training_actions(sidebar_cfg.api_url, sidebar_cfg)
     handle_inference_actions(sidebar_cfg.api_url, sidebar_cfg)
-    render_training_jobs(sidebar_cfg.api_url)
 
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-title">Status</div>', unsafe_allow_html=True)
-    train_job = st.session_state.get("train_job_status") or {}
     inference_job = st.session_state.get("inference_status") or {}
-    train_status = train_job.get("status", "not started")
     inference_status = inference_job.get("status", "not started")
     st.sidebar.markdown(
         f"""
-        - **Train job:** {train_status}  
         - **Inference job:** {inference_status}
         """
     )
@@ -221,9 +208,6 @@ def main_streamlit(app_cfg: AppConfig) -> None:
         return
     if nav == "Instructions":
         render_instructions()
-        return
-    if nav == "Settings":
-        render_settings()
         return
     if nav == "Inference":
         render_config_select(sidebar_cfg=sidebar_cfg)
