@@ -136,21 +136,6 @@ class YearInferenceRequest(BaseModel):
     geometry: GeoJSONPolygon
     # dataset: TileDatasetConfig
 
-# class LebanonInferenceRequest(BaseModel):
-#     """
-#     Request payload for API-triggered year jobs.
-#     """
-#     polygon:str
-#     project_name: str
-#     model_name : str
-#     year:int
-#     save_name:str
-#     # dataset: TileDatasetConfig
-
-
-
-
-
 class LebanonInferenceRequest(BaseModel):
     project_name: str
     model_name: str

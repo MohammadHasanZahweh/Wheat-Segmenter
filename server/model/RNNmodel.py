@@ -140,7 +140,7 @@ class RNNPixelPatchModel(AbstractModel):
         for _ in range(10):  # epochs
             idx = torch.randperm(X.shape[0])
             Xb, yb = X[idx], y[idx]
-
+            print(Xb.shape, yb.shape)
             logits = self.net(Xb)
             loss = self.criterion(logits, yb)
 
