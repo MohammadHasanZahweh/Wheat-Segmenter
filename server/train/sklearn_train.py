@@ -217,6 +217,62 @@ def train_sklearn_model(cfg: TrainConfig) -> dict[str, Any]:
     if len(y_train) == 0:
         raise RuntimeError("No training pixels extracted. Increase pixels_per_tile or adjust data.")
     
+    # Extract normalization statistics from the dataset
+    # The dataset already has the correct normalization parameters (meta stats or computed)
+    print("Extracting normalization statistics from dataset...")
+    if hasattr(ds, 'meta_stats') and ds.meta_stats:
+        # Use meta stats directly (they're already in the right format)
+        # Convert to numpy arrays with shape (T, B)
+        T = len(cfg.months)
+        B = 13  # Standard number of bands
+        global_mean = np.zeros((T, B), dtype=np.float32)
+        global_std = np.ones((T, B), dtype=np.float32)
+        
+        for t, month in enumerate(cfg.months):
+            if month in ds.meta_stats:
+                global_mean[t] = ds.meta_stats[month]['mean']
+                global_std[t] = ds.meta_stats[month]['std']
+        
+        print(f"Using meta stats: mean shape {global_mean.shape}, std shape {global_std.shape}")
+    else:
+        # Compute from raw training tiles if meta stats not available
+        print("No meta stats found, computing from raw training tiles...")
+        ds_raw = WheatTilesDataset(
+            root_preprocessed=cfg.root,
+            year=cfg.year,
+            regions=cfg.regions,
+            month_order=cfg.months,
+            temporal_layout=True,
+            normalize=False,  # Get raw data
+            band_stats=None,
+            meta_dir=None,
+            require_complete=True,
+            target_bands=None,
+            target_size=(64, 64),
+            size_policy="pad",
+            probe_limit=12,
+        )
+        
+        # Compute stats from a sample of training tiles
+        mean_list = []
+        sampled_tile_indices = train_tiles[:min(100, len(train_tiles))]
+        for tile_idx in sampled_tile_indices:
+            item = ds_raw[tile_idx]
+            x_raw = item["x"].numpy()  # Shape: (T, B, H, W)
+            mean_list.append(x_raw)
+        
+        if mean_list:
+            all_data = np.concatenate([x.reshape(x.shape[0], x.shape[1], -1) for x in mean_list], axis=2)  # (T, B, N_pixels)
+            global_mean = np.mean(all_data, axis=2, dtype=np.float32)  # (T, B)
+            global_std = np.std(all_data, axis=2, dtype=np.float32)    # (T, B)
+            global_std = np.where(global_std > 0, global_std, 1.0)
+            print(f"Computed from tiles: mean shape {global_mean.shape}, std shape {global_std.shape}")
+        else:
+            T, B = len(cfg.months), 13
+            global_mean = np.zeros((T, B), dtype=np.float32)
+            global_std = np.ones((T, B), dtype=np.float32)
+            print("[WARN] No tiles to compute stats from, using zeros/ones")
+    
     # Create and train model
     print(f"Training {cfg.model_type}...")
     model = create_model(cfg)
@@ -291,6 +347,8 @@ def train_sklearn_model(cfg: TrainConfig) -> dict[str, Any]:
         save_data = {
             'model': model,
             'model_type': cfg.model_type,
+            'mean': global_mean.tolist(),
+            'std': global_std.tolist(),
             'year': cfg.year,
             'months': cfg.months,
             'meta_dir': cfg.meta_dir if cfg.use_meta_stats else None,

@@ -24,6 +24,11 @@ class TrainAPI:
         resp.raise_for_status()
         return resp.json()
 
+    def start_inference_lebanon(self, payload):
+        resp = requests.post(f"{self.base}/inference-lebanon", json=payload, timeout=20)
+        resp.raise_for_status()
+        return resp.json()
+
     def fetch_result(self, project: str, run: str):
         resp = requests.get(
             f"{self.base}/results",

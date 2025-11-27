@@ -2,14 +2,52 @@ from __future__ import annotations
 
 import base64
 import json
-from typing import Any, Dict
+import os
+from io import BytesIO
+from pathlib import Path
+from typing import Any, Dict, List
 
 import folium
+import imageio
+import numpy as np
+import rasterio
 import requests
 import streamlit as st
 from folium.plugins import Draw
+from matplotlib import cm
+import matplotlib.pyplot as plt
 from shapely.geometry import shape
 from streamlit_folium import st_folium
+from apps.streamlit_app.core.geo import bounds_to_polygon
+
+
+def _load_raster_bounds(data_root: Path, region_name: str, year: int) -> List[Dict[str, Any]]:
+    """Probe AOI rasters under data_root/region_name/download/year_YYYY for bounds."""
+    bounds = []
+    base = data_root / region_name / "download" / f"year_{year}"
+    if not base.exists():
+        return bounds
+    for aoi_dir in sorted(base.glob("aoi_*_*")):
+        month_dirs = sorted(aoi_dir.glob("month_*"))
+        if not month_dirs:
+            continue
+        # pick the first month folder with any file inside a subfolder
+        tif_path = None
+        for mdir in month_dirs:
+            # some layouts have an extra tile folder level
+            candidates = list(mdir.glob("**/response.tif")) + list(mdir.glob("**/response.tiff"))
+            if candidates:
+                tif_path = candidates[0]
+                break
+        if tif_path is None:
+            continue
+        try:
+            with rasterio.open(tif_path) as src:
+                b = src.bounds  # left, bottom, right, top
+            bounds.append({"aoi": aoi_dir.name, "bounds": (b.left, b.bottom, b.right, b.top)})
+        except Exception:
+            continue
+    return bounds
 
 
 def render_training_jobs(api_url: str):
@@ -147,11 +185,14 @@ def render_settings():
 def render_config_select(sidebar_cfg):
     st.subheader("Step 2 - Select an area on the map (for your reference)")
     st.caption(
-        "Draw a polygon/rectangle below. The current server API uses the `region_name` directory you provide; "
-        "the geometry is stored in the session for reference until the API accepts polygons."
+        "Draw a polygon/rectangle below. The geometry is stored in the session and sent to the API for masking."
     )
 
     m = folium.Map(location=[33.9, 35.9], zoom_start=8, control_scale=True, tiles="CartoDB Positron")
+
+    # Show raster tile footprints if available
+    # Overlay footprints disabled to avoid warnings when data layout differs
+
     draw = Draw(
         export=False,
         position="topleft",
@@ -172,24 +213,24 @@ def render_config_select(sidebar_cfg):
     if map_output and map_output.get("all_drawings"):
         drawings = map_output["all_drawings"]
         if drawings:
-            st.session_state["inference_geometries"] = [d["geometry"] for d in drawings]
-            geom = shape(drawings[-1]["geometry"])
-            st.success(f"Captured {len(drawings)} geometries. Latest: {drawings[-1]['geometry']['type']}")
+            latest_geom = drawings[-1]["geometry"]
+            st.session_state["inference_geometry"] = latest_geom
+            geom = shape(latest_geom)
+            st.success(f"Captured {len(drawings)} geometries. Using latest: {latest_geom['type']}")
             if geom.is_valid and geom.area:
                 st.caption(f"Latest approx area (degrees^2): {geom.area:.4f}")
     else:
         st.info("No geometry selected yet.")
-        st.session_state.pop("inference_geometries", None)
+        st.session_state.pop("inference_geometry", None)
 
     request_template: Dict[str, Any] = st.session_state.get("inference_request") or {
         "project_name": sidebar_cfg.project_name,
-        "region_name": sidebar_cfg.region_name,
         "model_name": sidebar_cfg.model_name,
         "year": sidebar_cfg.inference_year,
         "save_name": sidebar_cfg.save_name,
     }
-    if st.session_state.get("inference_geometries"):
-        request_template["geometries"] = st.session_state["inference_geometries"]
+    if st.session_state.get("inference_geometry"):
+        request_template["geometry"] = st.session_state["inference_geometry"]
     st.markdown("**Current inference request template:**")
     st.code(json.dumps(request_template, indent=2), language="json")
 
@@ -238,3 +279,55 @@ def render_results(sidebar_cfg):
         mime="image/tiff",
         use_container_width=True,
     )
+
+    # Map overlay + simple stats from saved TIFF if available on disk
+    results_root = Path(os.environ.get("RESULTS_DIR", "./results"))
+    tiff_path = results_root / project / (run_name if run_name.endswith(".tiff") or run_name.endswith(".tif") else f"{run_name}.tiff")
+    if tiff_path.exists():
+        try:
+            with rasterio.open(tiff_path) as src:
+                arr = src.read(1)
+                bounds = src.bounds
+
+            pos = int(np.count_nonzero(arr > 0))
+            total = int(arr.size)
+            pct = (pos / total * 100) if total else 0
+            st.markdown(f"**Pixels predicted as wheat:** {pos:,} / {total:,} ({pct:.2f}%)")
+
+            # Simple histogram of prediction values (>0)
+            vals = arr[arr > 0]
+            if vals.size:
+                fig, ax = plt.subplots(figsize=(4, 3))
+                ax.hist(vals.flatten(), bins=20, color="#22c55e", alpha=0.9)
+                ax.set_title("Prediction value distribution")
+                ax.set_xlabel("Value")
+                ax.set_ylabel("Count")
+                st.pyplot(fig, use_container_width=True)
+
+            # Colorize: green where prediction > 0, transparent elsewhere
+            alpha = np.where(arr > 0, 0.85, 0.0).astype(np.float32)
+            rgba = np.zeros((*arr.shape, 4), dtype=np.float32)
+            rgba[..., 1] = 1.0  # green
+            rgba[..., 3] = alpha
+            png = (rgba * 255).astype(np.uint8)
+            buf = BytesIO()
+            imageio.imwrite(buf, png, format="png")
+            data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+            m = folium.Map(
+                location=[(bounds.bottom + bounds.top) / 2, (bounds.left + bounds.right) / 2],
+                zoom_start=10,
+                tiles="CartoDB Positron",
+            )
+            folium.raster_layers.ImageOverlay(
+                image=data_url,
+                bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+                opacity=0.6,
+                interactive=True,
+                cross_origin=False,
+            ).add_to(m)
+            folium.LayerControl().add_to(m)
+            st.markdown("**Map overlay of result**")
+            st_folium(m, height=600, use_container_width=True, key="result_map_overlay")
+        except Exception as exc:  # pragma: no cover
+            st.warning(f"Could not render map overlay: {exc}")
