@@ -62,6 +62,9 @@ class TrainConfig:
     use_meta_stats: bool = False
     meta_dir: str = "./meta"
     
+    # Prediction threshold (higher = fewer false positives)
+    threshold: float = 0.5
+    
     # Model selection
     model_type: ModelType = "xgboost"
     
@@ -295,9 +298,9 @@ def train_sklearn_model(cfg: TrainConfig) -> dict[str, Any]:
         print(f"Test pixels: {len(y_val)}")
         
         if len(y_val) > 0:
-            # Predict
+            # Predict using configured threshold
             if hasattr(model, "predict_proba"):
-                y_pred = (model.predict_proba(X_val)[:, 1] >= 0.5).astype(np.uint8)
+                y_pred = (model.predict_proba(X_val)[:, 1] >= cfg.threshold).astype(np.uint8)
             elif hasattr(model, "decision_function"):
                 y_pred = (model.decision_function(X_val) >= 0.0).astype(np.uint8)
             else:
@@ -353,6 +356,7 @@ def train_sklearn_model(cfg: TrainConfig) -> dict[str, Any]:
             'months': cfg.months,
             'meta_dir': cfg.meta_dir if cfg.use_meta_stats else None,
             'has_meta_stats': cfg.use_meta_stats,
+            'threshold': cfg.threshold,  # Save threshold for inference
             'train_config': {
                 'train_fraction': cfg.train_fraction,
                 'test_fraction': cfg.test_fraction,

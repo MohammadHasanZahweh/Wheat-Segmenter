@@ -66,6 +66,7 @@ class SklearnWheatModel(AbstractModel):
                  year: str = "2020",
                  months: Sequence[int] = (11, 12, 1, 2, 3, 4, 5, 6, 7),
                  meta_dir: Optional[str] = None,
+                 threshold: float = 0.5,
                  **kwargs):
         """
         Initialize sklearn model.
@@ -75,9 +76,11 @@ class SklearnWheatModel(AbstractModel):
             year: Year for loading meta statistics
             months: Month sequence for temporal data
             meta_dir: Directory containing meta statistics (if None, uses per-tile normalization)
+            threshold: Probability threshold for wheat classification (default 0.5, higher = fewer false positives)
             **kwargs: Model-specific hyperparameters
         """
         self.model_type = model_type
+        self.threshold = threshold
         self.model = self._create_model(**kwargs)
         self.num_classes = 2  # Binary classification: wheat vs non-wheat
         
@@ -164,7 +167,8 @@ class SklearnWheatModel(AbstractModel):
             'year': self.year,
             'months': self.months,
             'meta_dir': self.meta_dir,
-            'has_meta_stats': self.meta_stats is not None
+            'has_meta_stats': self.meta_stats is not None,
+            'threshold': self.threshold
         }
         joblib.dump(save_data, save_path)
         print(f"Model saved to {save_path}")
@@ -230,7 +234,7 @@ class SklearnWheatModel(AbstractModel):
         # Predict probabilities
         if hasattr(self.model, 'predict_proba'):
             proba = self.model.predict_proba(array)[:, 1]
-            return (proba >= 0.5).astype(np.uint8)
+            return (proba >= self.threshold).astype(np.uint8)
         elif hasattr(self.model, 'decision_function'):
             decision = self.model.decision_function(array)
             return (decision >= 0.0).astype(np.uint8)
@@ -377,7 +381,8 @@ def load_model(path: str, meta_dir: Optional[str] = None,
             model_type=model_type,
             year=saved_year,
             months=saved_months,
-            meta_dir=saved_meta_dir or meta_dir  # Allow override
+            meta_dir=saved_meta_dir or meta_dir,  # Allow override
+            threshold=loaded.get('threshold', 0.5)  # Load saved threshold or default
         )
         wrapper.model = raw_model
         
