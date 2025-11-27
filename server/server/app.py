@@ -10,7 +10,7 @@ import threading
 import time
 from uuid import uuid4
 from shapely.geometry import Polygon
-from .config import MODELS_PATH, DATA_PATH,PATCH_PROCESS_DATA_PATH, RESULTS_DIR, LebanonInferenceRequest, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest, TrainRequest
+from .config import MODELS_PATH, DATA_PATH,PATCH_SPLIT_DATA_PATH, RESULTS_DIR, LebanonInferenceRequest, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest, TrainRequest
 from server.train.sklearn_train import TrainConfig, train_sklearn_model
 from server.inference.poly_tile_inference import run_on_multiple_tiles
 from server.inference.inference_lebanon import run_on_lebanon_one_year
@@ -27,7 +27,7 @@ app = FastAPI(title="Wheat Mapping API")
 
 @app.get("/")
 def root():
-    return {"message": "Wheat Mapping API", "status": "running", "endpoints": ["/health", "/train", "/inference", "/models/list"]}
+    return {"message": "Wheat Mapping API", "status": "running", "endpoints": ["/health", "/train", "/inference", "/inference-lebanon", "/models/list"]}
 
 
 def _dataset_kwargs(cfg: TileDatasetConfig) -> dict[str, Any]:
@@ -93,7 +93,7 @@ def _run_training_job(req: TileTrainRequest) -> dict[str, Any]:
     }
     
     # Use the actual preprocessed_data path
-    root_path = PATCH_PROCESS_DATA_PATH
+    root_path = PATCH_SPLIT_DATA_PATH
     
     # Build base config
     cfg = TrainConfig(

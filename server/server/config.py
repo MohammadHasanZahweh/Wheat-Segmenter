@@ -12,7 +12,7 @@ DATA_PATH   = Path(os.getenv("DATA_DIR", r"./data"))
 META_PATH   = DATA_PATH / "meta/wheat"
 PROCESS_DATA_PATH       = DATA_PATH/"processed_data"
 PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data"
-PATCH_PROCESS_DATA_PATH   = PROCESS_DATA_PATH/"patch_processed_data"
+PATCH_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"patch_processed_data"
 
 MODELS_PATH = Path(os.getenv("RUNS_DIR", r"./runs"))
 RESULTS_DIR = Path(os.getenv("RESULTS_DIR", r"./results"))

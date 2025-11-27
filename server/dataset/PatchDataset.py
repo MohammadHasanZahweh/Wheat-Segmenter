@@ -48,8 +48,10 @@ def load_meta_stats(meta_dir: Path, year: str, months: Sequence[int]) -> Dict[in
     for month in months:
         npz_path = meta_dir / f"{year}_{month}.npz"
         if not npz_path.exists():
-            print(f"[WARN] Meta stats not found: {npz_path}, skipping month {month}")
-            continue
+            npz_path = meta_dir / f"{int(year)-1}_{month}.npz"
+            if not npz_path.exists():
+                print(f"[WARN] Meta stats not found: {npz_path}, skipping month {month}")
+                continue
         data = np.load(npz_path)
         if 'mean' not in data or 'std' not in data:
             print(f"[WARN] Meta file {npz_path} missing 'mean' or 'std', skipping")

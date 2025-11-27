@@ -165,28 +165,37 @@ class TorchPixelPatchModel(AbstractModel):
     # ---------------------------------------------------------------------
     #  ✔ TRAIN PATCH (mirrors pixel logic but flatten patches)
     # ---------------------------------------------------------------------
-    def fit_patch(self, dataset, epochs = 10):
+    def fit_patch(self, dataset, epochs = 10, class_names = ["non_wheat", "wheat"]):
         """
         dataset: iterable of (X, y)
            X: (k, 9, 13, H, W)
            y: (k, H, W)
         """
-        self.num_classes = len(dataset.class_names)
 
         # collect samples
         X_list = []
         y_list = []
 
-        for X, Y in dataset:
+        for X, Y, v in dataset:
+            X = X.detach().cpu().numpy()
+            Y = Y.detach().cpu().numpy()
+            v = v.detach().cpu().numpy()
+            # print(X.shape)
+            # print(X.shape)
+            # print(X.shape)
+            # print(v.dtype)
+            # print(v.min(), v.max())
+            # print(v)
 
             k, _, _, H, W = X.shape
 
             # flatten all spatial pixels
             X_flat = X.reshape(k, 9 * 13, H * W).transpose(0, 2, 1).reshape(-1, 9 * 13)
             Y_flat = Y.reshape(-1)
+            v_flat = v.reshape(-1) != 1
 
-            X_list.append(X_flat)
-            y_list.append(Y_flat)
+            X_list.append(X_flat[v_flat])
+            y_list.append(Y_flat[v_flat])
 
         X_train = np.concatenate(X_list)
         y_train = np.concatenate(y_list)
@@ -237,13 +246,13 @@ class TorchPixelPatchModel(AbstractModel):
     # ---------------------------------------------------------------------
     #  ✔ VALIDATION PATCH
     # ---------------------------------------------------------------------
-    def val_patch_dataset(self, dataset):
+    def val_patch_dataset(self, dataset, prefix=""):
         conf = np.zeros((self.num_classes, self.num_classes))
 
-        for X, Y in dataset:
-            preds = self.predict_patch(X)
+        for X, Y, v in dataset:
+            preds = self.predict_patch(X)[v!=0]
 
-            flat_y = Y.reshape(-1)
+            flat_y = Y[v!=0].reshape(-1)
             flat_p = preds.reshape(-1)
 
             for c in range(self.num_classes):
@@ -253,8 +262,8 @@ class TorchPixelPatchModel(AbstractModel):
                     conf[c] += hist
 
         return {
-            "confusion_matrix": conf.tolist(),
-            "accuracy": conf.diagonal().sum() / conf.sum(),
-            "F1_score": 2 * conf.diagonal() /
+            prefix + "confusion_matrix": conf.tolist(),
+            prefix + "accuracy": conf.diagonal().sum() / conf.sum(),
+            prefix + "F1_score": 2 * conf.diagonal() /
                 (conf.sum(axis=1) + conf.sum(axis=0)),
         }

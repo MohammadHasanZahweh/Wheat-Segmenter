@@ -6,6 +6,27 @@ from torch.utils.data import DataLoader, TensorDataset
 from .base_model import AbstractModel
 from torch import optim
 from pathlib import Path
+import torch.nn.functional as F
+
+class SimpleRNNClassifier(nn.Module):
+    def __init__(self, input_size=13, hidden_size=32, num_layers=1, num_classes=2):
+        super(SimpleRNNClassifier, self).__init__()
+        
+        self.rnn = nn.RNN(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True
+        )
+        
+        self.fc = nn.Linear(hidden_size, num_classes)
+
+    def forward(self, x):
+        # x: [B, 9, 13]
+        out, h_n = self.rnn(x)        # out: [B, 9, hidden], h_n: [1, B, hidden]
+        last_hidden = h_n[-1]         # [B, hidden]
+        logits = self.fc(last_hidden) # [B, 2]
+        return logits
 
 class RNNPixelPatchModel(AbstractModel):
     """
@@ -13,7 +34,7 @@ class RNNPixelPatchModel(AbstractModel):
     pixel and patch predictions.
     """
 
-    def __init__(self, classes, hidden_dims = 32, layer_count = 2, lr=1e-3, device=None, mean = np.array([0]), std = np.array([1])):
+    def __init__(self, classes, hidden_dims = 8, layer_count = 3, lr=1e-3, device=None, mean = np.array([0]), std = np.array([1])):
         self.num_classes = int(len(classes))
         self.classes = classes
         self.lr = lr
@@ -21,14 +42,12 @@ class RNNPixelPatchModel(AbstractModel):
         self.hidden_dims = hidden_dims
         self.mean = mean
         self.std = std
+        self.layer_count = 3
 
         input_dim = 13  # each feature is a 9x13 patch that we flatten
 
         # simple MLP
-        self.net = nn.Sequential(
-                nn.RNN(input_dim, hidden_dims, num_layers=layer_count),
-                nn.Linear(hidden_dims, self.num_classes),
-            ).to(self.device)
+        self.net = SimpleRNNClassifier(input_size=input_dim, hidden_size=hidden_dims, num_layers=layer_count, num_classes=2).to(self.device)
         
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.lr)
@@ -44,6 +63,7 @@ class RNNPixelPatchModel(AbstractModel):
                 "hidden_dims": self.hidden_dims,
                 "classes": self.classes,
                 "lr": self.lr,
+                "layer_count":self.layer_count,
                 "mean": self.mean.tolist(),
                 "std": self.std.tolist(),
             },
@@ -56,6 +76,7 @@ class RNNPixelPatchModel(AbstractModel):
         model = cls(
             classes=checkpoint["classes"],
             hidden_dims = checkpoint["hidden_dims"],
+            layer_count = checkpoint["layer_count"],
             lr=checkpoint.get("lr", 1e-3),
             device=device,
             mean = np.array(checkpoint.get("mean", [0])),
@@ -140,7 +161,6 @@ class RNNPixelPatchModel(AbstractModel):
         for _ in range(10):  # epochs
             idx = torch.randperm(X.shape[0])
             Xb, yb = X[idx], y[idx]
-            print(Xb.shape, yb.shape)
             logits = self.net(Xb)
             loss = self.criterion(logits, yb)
 
@@ -151,20 +171,23 @@ class RNNPixelPatchModel(AbstractModel):
     # ---------------------------------------------------------------------
     #  ✔ TRAIN PATCH (mirrors pixel logic but flatten patches)
     # ---------------------------------------------------------------------
-    def fit_patch(self, dataset, epochs = 10):
+    def fit_patch(self, dataset, epochs = 10, class_names = ["non_wheat", "wheat"]):
         """
         dataset: iterable of (X, y)
            X: (k, 9, 13, H, W)
            y: (k, H, W)
         """
-        self.num_classes = len(dataset.class_names)
+        # self.num_classes = len(dataset.class_names)
 
         # collect samples
         X_list = []
         y_list = []
 
         for X, Y in dataset:
-
+            print(X.shape)
+            print(X.shape)
+            print(X.shape)
+            print(X.shape)
             k, _, _, H, W = X.shape
 
             # flatten all spatial pixels
@@ -223,13 +246,13 @@ class RNNPixelPatchModel(AbstractModel):
     # ---------------------------------------------------------------------
     #  ✔ VALIDATION PATCH
     # ---------------------------------------------------------------------
-    def val_patch_dataset(self, dataset):
+    def val_patch_dataset(self, dataset, prefix=""):
         conf = np.zeros((self.num_classes, self.num_classes))
 
-        for X, Y in dataset:
-            preds = self.predict_patch(X)
+        for X, Y, v in dataset:
+            preds = self.predict_patch(X)[v!=0]
 
-            flat_y = Y.reshape(-1)
+            flat_y = Y[v!=0].reshape(-1)
             flat_p = preds.reshape(-1)
 
             for c in range(self.num_classes):
@@ -239,8 +262,8 @@ class RNNPixelPatchModel(AbstractModel):
                     conf[c] += hist
 
         return {
-            "confusion_matrix": conf.tolist(),
-            "accuracy": conf.diagonal().sum() / conf.sum(),
-            "F1_score": 2 * conf.diagonal() /
+            prefix + "confusion_matrix": conf.tolist(),
+            prefix + "accuracy": conf.diagonal().sum() / conf.sum(),
+            prefix + "F1_score": 2 * conf.diagonal() /
                 (conf.sum(axis=1) + conf.sum(axis=0)),
         }
