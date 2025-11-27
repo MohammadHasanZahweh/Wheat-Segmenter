@@ -302,16 +302,6 @@ def render_results(sidebar_cfg):
             pct = (pos / total * 100) if total else 0
             st.markdown(f"**Pixels predicted as wheat:** {pos:,} / {total:,} ({pct:.2f}%)")
 
-            # Simple histogram of prediction values (>0)
-            vals = arr[arr > 0]
-            if vals.size:
-                fig, ax = plt.subplots(figsize=(4, 3))
-                ax.hist(vals.flatten(), bins=20, color="#22c55e", alpha=0.9)
-                ax.set_title("Prediction value distribution")
-                ax.set_xlabel("Value")
-                ax.set_ylabel("Count")
-                st.pyplot(fig, use_container_width=True)
-
             # Colorize: green where prediction > 0, transparent elsewhere
             alpha = np.where(arr > 0, 0.85, 0.0).astype(np.float32)
             rgba = np.zeros((*arr.shape, 4), dtype=np.float32)
