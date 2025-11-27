@@ -48,7 +48,7 @@ def render_sidebar(app_cfg) -> SidebarConfig:
 
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-title">API</div>', unsafe_allow_html=True)
-    api_url = st.sidebar.text_input("API base URL", value="http://127.0.0.1:8000")
+    api_url = st.sidebar.text_input("API_URL", value="http://127.0.0.1:8000")
 
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-title">Inference (server)</div>', unsafe_allow_html=True)
