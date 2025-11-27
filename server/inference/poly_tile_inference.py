@@ -356,7 +356,7 @@ def run_on_tile_one_year(
             dst_col0 = col0 - col_start
             dst_window = Window(dst_col0, dst_row0, patch_w, patch_h)
 
-            dst.write(out_patch, window=dst_window)
+            dst.write(out_patch*255, window=dst_window)
 
     # ------------------------------------------------------
     # 8) Clean up

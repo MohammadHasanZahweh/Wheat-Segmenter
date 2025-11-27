@@ -203,7 +203,7 @@ def run_on_tile_one_year(
             # --------------------------------------------------
             # 6) Write patch to correct window in output
             # --------------------------------------------------
-            dst.write(out_patch, window=window)
+            dst.write(out_patch*255, window=window)
 
     # ------------------------------------------------------
     # 7) Clean up

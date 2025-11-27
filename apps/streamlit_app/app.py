@@ -20,7 +20,7 @@ from apps.streamlit_app.ui.sidebar import SidebarConfig, render_sidebar
 from apps.streamlit_app.ui.styles import inject_global_styles
 
 
-DEFAULT_DATA_ROOT = Path(os.environ.get("DATA_ROOT", r"C:\\Users\\Administrator\\Desktop\\preprocessed_data"))
+DEFAULT_DATA_ROOT = Path(os.environ.get("DATA_ROOT", r"wheat"))
 
 
 @dataclass
