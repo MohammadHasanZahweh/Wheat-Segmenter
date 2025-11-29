@@ -163,7 +163,7 @@ def run_inference_job(job_id: str, data_path: Path, year: int, aois: list, model
         print(f"  Output: {output_path}", flush=True)
         print(f"{'='*60}\n", flush=True)
 
-        # download_files(polygon, [year-1, year], ) ## TODO: add downloader
+        download_files(polygon, [year-1, year], out_dir=data_path) ## TODO: add downloader
         
         run_on_multiple_tiles(
             base_path=str(data_path),
@@ -328,7 +328,9 @@ def start_inference(req: YearInferenceRequest):
         "submitted_at": time.time(),
     }
     
-    data_path = DATA_PATH / req.region_name / "download"
+    # data_path = DATA_PATH / req.region_name / "download"
+    region = f"data_{uuid4().hex()}"
+    data_path = DATA_PATH/region/"download"
     output_path = RESULTS_DIR / req.project_name / req.save_name
 
     coords = req.geometry.coordinates[0]  # outer ring

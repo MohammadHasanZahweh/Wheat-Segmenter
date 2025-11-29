@@ -155,7 +155,7 @@ def render_settings():
             "use_meta_stats": True,
             "meta_dir": "./meta",
             "project_name": "Wheat",
-            "model_name": "fixed_xgboost_2pct.sklearn.joblib",
+            "model_name": 'xgboost_5pct_threshold_0.6.sklearn.joblib',
             "save_name": "latest_run.tiff",
         },
     )

@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir shapely
 RUN pip install --no-cache-dir sentinelhub
 RUN pip install --no-cache-dir geopandas
+RUN pip install --no-cache-dir matplotlib
 
 # Copy app code
 COPY . ./server
