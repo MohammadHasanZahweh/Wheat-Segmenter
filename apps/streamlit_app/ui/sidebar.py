@@ -30,10 +30,9 @@ def render_sidebar(app_cfg) -> SidebarConfig:
             "save_name": "latest_run.tiff",
             "year": app_cfg.year,
         },
-    )
     year = settings.get("year", app_cfg.year)
     project_name = "Wheat"
-    model_name = settings.get("model_name", "fixed_xgboost_2pct.sklearn.joblib")
+    model_name = settings.get("model_name",  'xgboost_5pct_threshold_0.6.sklearn.joblib')
     save_name = settings.get("save_name", "latest_run.tiff")
 
     if "train_job_id" not in st.session_state:
@@ -54,7 +53,7 @@ def render_sidebar(app_cfg) -> SidebarConfig:
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-title">Inference (server)</div>', unsafe_allow_html=True)
     st.sidebar.text_input("Project name", value=project_name, disabled=True)
-    model_options = ["fixed_xgboost_2pct.sklearn.joblib"]
+    model_options = ['xgboost_5pct_threshold_0.5.sklearn.joblib', 'xgboost_5pct_threshold_0.6.sklearn.joblib', 'xgboost_5pct_threshold_0.65.sklearn.joblib', 'xgboost_5pct_threshold_0.7.sklearn.joblib']
     model_name_input = st.sidebar.selectbox("Model (.joblib)", options=model_options, index=0 if model_name not in model_options else model_options.index(model_name))
     save_name_input = st.sidebar.text_input("Result name (.tiff)", value=save_name)
     inference_year = st.sidebar.number_input("Year", min_value=2000, max_value=2100, value=int(year), step=1)
