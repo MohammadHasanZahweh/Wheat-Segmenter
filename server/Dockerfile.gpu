@@ -12,6 +12,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir shapely
+RUN pip install --no-cache-dir sentinelhub
+RUN pip install --no-cache-dir geopandas
 
 # Copy app code
 COPY . ./server

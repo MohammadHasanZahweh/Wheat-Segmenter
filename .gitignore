@@ -211,7 +211,6 @@ testing.ipynb
 testing*.ipynb
 test.py
 data
-runs
 output
 temp
 results

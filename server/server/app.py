@@ -11,6 +11,7 @@ import time
 from uuid import uuid4
 from shapely.geometry import Polygon
 from .config import MODELS_PATH, DATA_PATH,PATCH_SPLIT_DATA_PATH, RESULTS_DIR, LebanonInferenceRequest, TileDatasetConfig, TileTrainRequest, TrainingAlgorithm, YearInferenceRequest, TrainRequest
+from .data_downloader import download_files
 from server.train.sklearn_train import TrainConfig, train_sklearn_model
 from server.inference.poly_tile_inference import run_on_multiple_tiles
 from server.inference.inference_lebanon import run_on_lebanon_one_year
@@ -161,6 +162,8 @@ def run_inference_job(job_id: str, data_path: Path, year: int, aois: list, model
         print(f"  Year: {year}, AOIs: {aois}", flush=True)
         print(f"  Output: {output_path}", flush=True)
         print(f"{'='*60}\n", flush=True)
+
+        # download_files(polygon, [year-1, year], ) ## TODO: add downloader
         
         run_on_multiple_tiles(
             base_path=str(data_path),

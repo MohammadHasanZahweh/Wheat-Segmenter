@@ -1,7 +1,6 @@
 venv
 __pycache__
 data
-runs
 output
 temp
 results
