@@ -79,8 +79,12 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
     inference_feedback = st.sidebar.empty()
     client = TrainAPI(api_url)
 
+    project_name = "Wheat"
+    region_name = "region_0"
+
     base_request = {
-        "project_name": sidebar_cfg.project_name,
+        "project_name": project_name,
+        "region_name": region_name,
         "model_name": sidebar_cfg.model_name,
         "year": int(sidebar_cfg.inference_year),
         "save_name": sidebar_cfg.save_name,
@@ -91,11 +95,13 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
     if sidebar_cfg.start_inference:
         if not client.base:
             inference_feedback.error("Provide a valid API base URL.")
-        elif not sidebar_cfg.project_name or not sidebar_cfg.model_name:
-            inference_feedback.error("Project and model name are required.")
+        elif not sidebar_cfg.model_name:
+            inference_feedback.error("Model name is required.")
+        elif "geometry" not in base_request:
+            inference_feedback.error("Draw an area on the map before starting inference.")
         else:
             try:
-                data = client.start_inference_lebanon(base_request)
+                data = client.start_inference(base_request)
                 job_id = data.get("job_id")
                 if not job_id:
                     raise ValueError(f"Unexpected response: {data}")
@@ -120,10 +126,10 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
 
     if sidebar_cfg.fetch_result:
         req = st.session_state.get("inference_request") or base_request
-        project = req.get("project_name") or sidebar_cfg.project_name
+        project = req.get("project_name") or project_name
         run_name = req.get("save_name") or sidebar_cfg.save_name
-        if not project or not run_name:
-            inference_feedback.error("Project and result name are required to fetch results.")
+        if not run_name:
+            inference_feedback.error("Result name is required to fetch results.")
         else:
             try:
                 result = client.fetch_result(project, run_name)

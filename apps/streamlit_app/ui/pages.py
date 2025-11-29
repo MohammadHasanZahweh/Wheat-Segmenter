@@ -154,9 +154,8 @@ def render_settings():
             "months_text": "11 12 1 2 3 4 5 6 7",
             "use_meta_stats": True,
             "meta_dir": "./meta",
-            "project_name": "wheat",
-            "region_name": "region_0",
-            "model_name": "xgb_2020.joblib",
+            "project_name": "Wheat",
+            "model_name": "fixed_xgboost_2pct.sklearn.joblib",
             "save_name": "latest_run.tiff",
         },
     )
@@ -164,8 +163,7 @@ def render_settings():
     root = st.text_input("Project root/name", value=defaults["root"])
     year = st.text_input("Default year", value=defaults["year"])
     months_text = st.text_input("Months (space-separated)", value=defaults["months_text"])
-    project_name = st.text_input("Default project name", value=defaults["project_name"])
-    region_name = st.text_input("Default region name", value=defaults["region_name"])
+    project_name = st.text_input("Default project name", value=defaults["project_name"], disabled=True)
     model_name = st.text_input("Default model file (.joblib)", value=defaults["model_name"])
     save_name = st.text_input("Default result name (.tiff)", value=defaults["save_name"])
 
@@ -180,7 +178,6 @@ def render_settings():
             "use_meta_stats": use_meta_stats,
             "meta_dir": meta_dir,
             "project_name": project_name,
-            "region_name": region_name,
             "model_name": model_name,
             "save_name": save_name,
         }

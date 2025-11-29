@@ -25,15 +25,15 @@ def render_sidebar(app_cfg) -> SidebarConfig:
     settings = st.session_state.get(
         "settings",
         {
-            "project_name": app_cfg.root,
+            "project_name": "Wheat",
             "model_name": "xgb_2020.joblib",
             "save_name": "latest_run.tiff",
             "year": app_cfg.year,
         },
     )
     year = settings.get("year", app_cfg.year)
-    project_name = settings.get("project_name", app_cfg.root)
-    model_name = settings.get("model_name", "xgb_2020.joblib")
+    project_name = "Wheat"
+    model_name = settings.get("model_name", "fixed_xgboost_2pct.sklearn.joblib")
     save_name = settings.get("save_name", "latest_run.tiff")
 
     if "train_job_id" not in st.session_state:
@@ -53,8 +53,9 @@ def render_sidebar(app_cfg) -> SidebarConfig:
 
     st.sidebar.markdown("---")
     st.sidebar.markdown('<div class="sidebar-title">Inference (server)</div>', unsafe_allow_html=True)
-    project_name_input = st.sidebar.text_input("Project name", value=project_name)
-    model_name_input = st.sidebar.text_input("Model (.joblib)", value=model_name)
+    st.sidebar.text_input("Project name", value=project_name, disabled=True)
+    model_options = ["fixed_xgboost_2pct.sklearn.joblib"]
+    model_name_input = st.sidebar.selectbox("Model (.joblib)", options=model_options, index=0 if model_name not in model_options else model_options.index(model_name))
     save_name_input = st.sidebar.text_input("Result name (.tiff)", value=save_name)
     inference_year = st.sidebar.number_input("Year", min_value=2000, max_value=2100, value=int(year), step=1)
     start_inference = st.sidebar.button("Start Inference Job", use_container_width=True)
@@ -67,7 +68,7 @@ def render_sidebar(app_cfg) -> SidebarConfig:
 
     return SidebarConfig(
         api_url=api_url.rstrip("/"),
-        project_name=project_name_input,
+        project_name=project_name,
         model_name=model_name_input,
         save_name=save_name_input,
         inference_year=int(inference_year),
