@@ -29,8 +29,11 @@ services:
       context: ./apps
     ports:
       - "8501:8501"
+    volumes:
+      - ./results:/results
     environment:
       - API_URL=http://api:8000
+      - RESULTS_DIR=/results
     depends_on:
       - api
     restart: unless-stopped

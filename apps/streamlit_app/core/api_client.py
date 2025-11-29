@@ -19,6 +19,11 @@ class TrainAPI:
         resp.raise_for_status()
         return resp.json()
 
+    def inference_status(self, job_id: str):
+        resp = requests.get(f"{self.base}/inference/status", params={"id": job_id}, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
     def start_inference(self, payload):
         resp = requests.post(f"{self.base}/inference", json=payload, timeout=20)
         resp.raise_for_status()

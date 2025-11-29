@@ -118,7 +118,7 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
 
     if sidebar_cfg.refresh_inference and st.session_state.get("inference_job_id"):
         try:
-            status_data = client.status(st.session_state["inference_job_id"])
+            status_data = client.inference_status(st.session_state["inference_job_id"])
             st.session_state["inference_status"] = status_data
             inference_feedback.info(f"Inference status: {status_data.get('status', 'unknown')}")
         except requests.RequestException as exc:
