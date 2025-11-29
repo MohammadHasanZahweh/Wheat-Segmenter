@@ -78,6 +78,9 @@ def get_file_name(base_path, year, month, aoi):
 def get_files_list(base_path, year, aoi, months=[11,12,1,2,3,4,5,6,7]):
     return [get_file_name(base_path, year, month, aoi) for month in months]
 
+def get_aois(base_path, year):
+    return len([a for a in os.listdir( os.path.join(base_path, f"year_{year-1}/")) if a.startswith("aoi")])
+
 def _bounds_intersect(b1, b2) -> bool:
     """
     Quick bbox intersection check.
@@ -380,7 +383,7 @@ def run_on_multiple_tiles(
         patch_size: int = 256,
         stride: int = 256,):
     os.makedirs("temp", exist_ok=True)
-    for aoi in aois:
+    for aoi in range(get_aois(base_path,year)): #aois
         run_on_tile_one_year(base_path, year, aoi, partial(model.predict_patch, normalize = True), f"temp/{aoi}.tiff", polygons, patch_size, stride)
     
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -23,7 +23,7 @@ from shapely.geometry import Polygon,MultiPolygon
 import numpy as np
 import os
 import rasterio as rio
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from math import ceil
 
 
@@ -80,7 +80,6 @@ function evaluatePixel(sample) {
     return [ sample.B01, sample.B02, sample.B03, sample.B04, sample.B05, sample.B06, sample.B07, sample.B08, sample.B8A, sample.B09, sample.B10, sample.B11, sample.B12]
 }
 """
-
 
 def split_aoi(geom_poly,crs,resolution):
     MAX_SIZE = 2500

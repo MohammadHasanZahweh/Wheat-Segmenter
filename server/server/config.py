@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 DATA_PATH   = Path(os.getenv("DATA_DIR", r"./data"))
-META_PATH   = DATA_PATH / "meta/wheat"
+META_PATH   = Path("server") / "meta/wheat"
 PROCESS_DATA_PATH       = DATA_PATH/"processed_data"
 PIXEL_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"split_processed_data"
 PATCH_SPLIT_DATA_PATH   = PROCESS_DATA_PATH/"patch_processed_data"

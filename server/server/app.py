@@ -18,6 +18,7 @@ from server.inference.inference_lebanon import run_on_lebanon_one_year
 from server.model.torch_pixel_model import TorchPixelPatchModel
 from server.model.sklearn_models import load_model as load_sklearn_model
 import joblib
+import geopandas as gpd
 
 import logging 
 
@@ -163,7 +164,11 @@ def run_inference_job(job_id: str, data_path: Path, year: int, aois: list, model
         print(f"  Output: {output_path}", flush=True)
         print(f"{'='*60}\n", flush=True)
 
-        download_files(polygon, [year-1, year], out_dir=data_path) ## TODO: add downloader
+        download_files(
+            gpd.GeoDataFrame({"id": [1]}, geometry=[polygon], crs="EPSG:4326"),
+            [year-1, year], 
+            out_dir=data_path
+            ) ## TODO: add downloader
         
         run_on_multiple_tiles(
             base_path=str(data_path),
@@ -329,7 +334,7 @@ def start_inference(req: YearInferenceRequest):
     }
     
     # data_path = DATA_PATH / req.region_name / "download"
-    region = f"data_{uuid4().hex()}"
+    region = f"data_{uuid4().hex}"
     data_path = DATA_PATH/region/"download"
     output_path = RESULTS_DIR / req.project_name / req.save_name
 

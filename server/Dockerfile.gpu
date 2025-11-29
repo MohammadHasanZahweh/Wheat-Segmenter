@@ -21,6 +21,7 @@ COPY . ./server
 
 ENV PYTHONUNBUFFERED=1
 
+COPY ./meta ./meta
 
 EXPOSE 8000
 # Example: main.py exposes FastAPI app = app
