@@ -74,26 +74,21 @@ All models trained on 5% of 10% ofLebanon data, tested on remaining 95% of the 1
 - **10GB disk space** for images and data
 
 ### Step 1: Clone Repository
-
+```bash
+git clone https://github.com/MohammadHasanZahweh/Wheat-Segmenter
 cd Wheat-Segmenter
-
+```
 ### Step 2: Launch Application
 
-**With GPU (Recommended - 10x faster)**:
 ```bash
 docker-compose -f docker-compose.gpu.yaml up --build
-```
-
-**CPU Only**:
-```bash
-docker-compose up --build
 ```
 
 ### Step 3: Access Web Interface
 
 Open your browser and go to:
 - 🌐 **Streamlit UI**: http://localhost:8501
-- 📚 **API Documentation**: http://localhost:8000/docs
+- 📚 **API Endpoints**: http://localhost:8000/
 
 ---
 
@@ -147,7 +142,6 @@ Wheat-Segmenter/
 │  
 │
 ├── 🐳 docker-compose.gpu.yaml      # GPU deployment
-├── 🐳 docker-compose.yaml          # CPU deployment
 └── 📄 README.md                    # This file
 ```
 
@@ -189,10 +183,6 @@ environment:
 ---
 
 
-### "No tiles found in selected region"
-**Cause**: You drew polygon outside satellite data coverage  
-**Fix**: Draw polygon within Lebanon, especially Bekaa Valley region (Lon 35.5-36.5, Lat 33.5-34.5)
-
 ### "Model predicts 0% wheat everywhere"
 **Cause**: Region is urban/non-agricultural or data issue  
 **Fix**: 
@@ -200,12 +190,11 @@ environment:
 2. Switch to model with lower threshold (0.5 instead of 0.7)
 
 ### "Inference is very slow"
-**Cause**: Running on CPU or very large polygon  
+**Cause**: Running on very large polygon  
 **Fix**:
-1. Use GPU version: `docker-compose -f docker-compose.gpu.yaml up`
-2. Draw smaller regions for testing
+1. Draw smaller regions for testing
 
-### "Too many false positives in cities"
+### "Too many noise pixels false positives in cities"
 **Cause**: Threshold too low  
 **Fix**: Switch to `xgboost_5pct_threshold_0.65.sklearn.joblib` or higher
 
