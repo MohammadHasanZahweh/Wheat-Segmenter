@@ -120,6 +120,99 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+### Training Models
+
+**XGBoost (recommended)**:
+```python
+from server.train.sklearn_train import TrainConfig, train_sklearn_model
+
+cfg = TrainConfig(
+    root='path/to/preprocessed_data',
+    year='2020',
+    model_type='xgboost',
+    train_fraction=0.005,  # 0.5% of data
+    test_fraction=0.15,
+    pixels_per_tile=4096,
+    balance_pixels=True,
+    use_meta_stats=True,
+    meta_dir='./meta',
+    xgb_n_estimators=400,
+    xgb_max_depth=8,
+    save_model='./runs/wheat/xgboost.sklearn.joblib'
+)
+
+results = train_sklearn_model(cfg)
+print(f"F1: {results['f1']:.3f}, IoU: {results['iou']:.3f}")
+```
+
+**HistGradientBoosting**:
+```python
+from server.train.sklearn_train import TrainConfig, train_sklearn_model
+
+cfg = TrainConfig(
+    root='path/to/preprocessed_data',
+    year='2020',
+    model_type='histgb',
+    train_fraction=0.005,
+    use_meta_stats=True,
+    meta_dir='./meta',
+    save_model='./runs/wheat/histgb.sklearn.joblib'
+)
+
+results = train_sklearn_model(cfg)
+```
+
+**Random Forest**:
+```python
+from server.train.sklearn_train import TrainConfig, train_sklearn_model
+
+cfg = TrainConfig(
+    root='path/to/preprocessed_data',
+    year='2020',
+    model_type='random_forest',
+    train_fraction=0.005,
+    use_meta_stats=True,
+    meta_dir='./meta',
+    save_model='./runs/wheat/rf.sklearn.joblib'
+)
+
+results = train_sklearn_model(cfg)
+```
+
+### Inference
+
+**Local Python**:
+```python
+from server.model.sklearn_models import load_model
+from server.inference.inference_lebanon import run_on_lebanon_one_year
+
+# Load trained model
+model = load_model('./runs/wheat/xgboost.sklearn.joblib')
+
+# Run inference on polygon
+run_on_lebanon_one_year(
+    base_path='data/Lebanon/merge_data',
+    year=2020,
+    polygons=[{
+        'type': 'Polygon',
+        'coordinates': [[[35.5, 33.5], [35.6, 33.5], [35.6, 33.6], [35.5, 33.6], [35.5, 33.5]]]
+    }],
+    model=model,
+    out_path='./results/Lebanon/my_region',
+    patch_size=256,
+    stride=256
+)
+# Output: ./results/Lebanon/my_region/wheat_mask.tif
+```
+
+**Via Streamlit UI**:
+```bash
+streamlit run apps/streamlit_app/app.py
+# 1. Select model from dropdown
+# 2. Draw polygon on map
+# 3. Click "Run Inference"
+```
+
 ### Docker Deployment
 
 ```bash
@@ -360,7 +453,7 @@ meta/2020_11.npz: {mean: (13,), std: (13,)}
 | Model | F1 | IoU | Training Time | Model Size | Status |
 |-------|-----|-----|---------------|------------|--------|
 | NDVI Threshold | 0.58 | 0.41 | N/A | N/A | Baseline |
-| Random Forest | 0.85 | 0.64 | 5min | 50MB | Legacy |
+| Random Forest | 0.85 | 0.75 | 5min | 50MB | Legacy |
 | SVM | 0.72 | 0.57 | 3min | 5MB | Legacy |
 | **XGBoost** | **0.86** | **0.75** | **2min** | **1.2MB** | ✅ **Production** |
 | HistGB | 0.85 | 0.74 | 1min | 800KB | ✅ Production |
@@ -452,7 +545,7 @@ def f1_iou(y_true, y_pred):
 | False | 0.91 | 0.74 | 0.82 |
 | **True** | **0.82** | **0.90** | **0.86** |
 
-**Impact of Training Data Size**:
+**Impact of Training Data Size (on 10% of Lebanon)**:
 | Train % | F1 | Training Time | Notes |
 |---------|-----|---------------|-------|
 | 1% | 0.83 | 30s | Underfitting |
