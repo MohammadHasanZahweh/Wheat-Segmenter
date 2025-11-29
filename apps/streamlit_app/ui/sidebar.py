@@ -26,10 +26,11 @@ def render_sidebar(app_cfg) -> SidebarConfig:
         "settings",
         {
             "project_name": "Wheat",
-            "model_name": "xgb_2020.joblib",
+            "model_name": 'xgboost_5pct_threshold_0.6.sklearn.joblib',
             "save_name": "latest_run.tiff",
             "year": app_cfg.year,
         },
+    )
     year = settings.get("year", app_cfg.year)
     project_name = "Wheat"
     model_name = settings.get("model_name",  'xgboost_5pct_threshold_0.6.sklearn.joblib')
