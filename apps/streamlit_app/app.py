@@ -81,6 +81,7 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
 
     project_name = "Wheat"
     region_name = "region_0"
+    job_id = st.session_state.get("inference_job_id")
 
     base_request = {
         "project_name": project_name,
@@ -120,7 +121,10 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
         try:
             status_data = client.inference_status(st.session_state["inference_job_id"])
             st.session_state["inference_status"] = status_data
-            inference_feedback.info(f"Inference status: {status_data.get('status', 'unknown')}")
+            status_label = status_data.get("status", "unknown")
+            detail = status_data.get("output_exists")
+            suffix = f" | output ready: {detail}" if detail is not None else ""
+            inference_feedback.info(f"Inference status: {status_label}{suffix}")
         except requests.RequestException as exc:
             inference_feedback.error(f"Failed to fetch inference status: {exc}")
 
@@ -128,17 +132,25 @@ def handle_inference_actions(api_url: str, sidebar_cfg: SidebarConfig):
         req = st.session_state.get("inference_request") or base_request
         project = req.get("project_name") or project_name
         run_name = req.get("save_name") or sidebar_cfg.save_name
+        status_data = st.session_state.get("inference_status") or {}
+        if job_id and status_data.get("status") and status_data["status"] != "completed":
+            inference_feedback.warning("Inference is not completed yet. Refresh status and try again once finished.")
+            return
+        if status_data.get("output_name"):
+            run_name = status_data["output_name"]
+        if status_data.get("project"):
+            project = status_data["project"]
         if not run_name:
             inference_feedback.error("Result name is required to fetch results.")
         else:
             try:
-                result = client.fetch_result(project, run_name)
-                st.session_state["inference_status"] = {"status": result.get("status")}
+                result = client.fetch_result(project, run_name, job_id=job_id)
+                st.session_state["inference_status"] = {**status_data, "status": result.get("status")}
                 image_b64 = result.get("image_base64")
                 if image_b64:
                     st.session_state["inference_result_b64"] = image_b64
-                    st.session_state["inference_last_result_name"] = run_name
-                    inference_feedback.success(f"Fetched result for {project}/{run_name}")
+                    st.session_state["inference_last_result_name"] = result.get("run", run_name)
+                    inference_feedback.success(f"Fetched result for {project}/{st.session_state['inference_last_result_name']}")
                 else:
                     inference_feedback.warning(result.get("status", "Result not ready yet"))
             except requests.RequestException as exc:

@@ -34,10 +34,17 @@ class TrainAPI:
         resp.raise_for_status()
         return resp.json()
 
-    def fetch_result(self, project: str, run: str):
+    def fetch_result(self, project: str | None, run: str | None, job_id: str | None = None):
+        params = {}
+        if project:
+            params["project"] = project
+        if run:
+            params["run"] = run
+        if job_id:
+            params["job_id"] = job_id
         resp = requests.get(
             f"{self.base}/results",
-            params={"project": project, "run": run},
+            params=params,
             timeout=20,
         )
         resp.raise_for_status()

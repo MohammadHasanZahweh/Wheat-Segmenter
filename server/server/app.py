@@ -229,6 +229,7 @@ def start_train(req: TileTrainRequest):
         job_id = f"job_{uuid4().hex}"
         jobs[job_id] = {
             "status": "running",
+            "job_type": "train",
             "job_name": req.job_name,
             "algorithm": req.algorithm.value,
             "submitted_at": time.time(),
@@ -325,18 +326,24 @@ def start_inference(req: YearInferenceRequest):
     except Exception as e:
         return {"job_id": job_id, "status": "failed", "reason": f"Unable to load model: {str(e)}"}
     
+    output_path = RESULTS_DIR / req.project_name / req.save_name
+    
     jobs[job_id] = {
         "status": "running",
+        "job_type": "inference",
         "job_name": req.project_name + "_" + req.save_name,
         "model_name": model_name,
         "model_type": model_type,
+        "project": req.project_name,
+        "region": req.region_name,
+        "save_name": req.save_name,
+        "output_path": str(output_path),
         "submitted_at": time.time(),
     }
     
     # data_path = DATA_PATH / req.region_name / "download"
     region = f"data_{uuid4().hex}"
     data_path = DATA_PATH/region/"download"
-    output_path = RESULTS_DIR / req.project_name / req.save_name
 
     coords = req.geometry.coordinates[0]  # outer ring
     poly = Polygon(coords)
@@ -427,16 +434,20 @@ def start_inference_lebanon(req: LebanonInferenceRequest):
     except Exception as e:
         return {"job_id": job_id, "status": "failed", "reason": f"Unable to load model: {str(e)}"}
     
+    output_path = RESULTS_DIR / req.project_name / req.save_name
     jobs[job_id] = {
         "status": "running",
+        "job_type": "inference",
         "job_name": req.project_name + "_" + req.save_name,
         "model_name": model_name,
         "model_type": model_type,
+        "project": req.project_name,
+        "save_name": req.save_name,
+        "output_path": str(output_path),
         "submitted_at": time.time(),
     }
     
     data_path = DATA_PATH / "Lebanon/merge_data"
-    output_path = RESULTS_DIR / req.project_name / req.save_name
     coords = req.geometry.coordinates[0]  # outer ring
     poly = Polygon(coords)
 
@@ -456,18 +467,55 @@ def start_train(req: TrainRequest):
     t.start()
     return {"job_id": job_id}
 
-@app.get("/results")
-def get_results(project: str, run: str):
-    if not run.endswith(".tiff"):
-        run += ".tiff"
+@app.get("/inference/status")
+def inference_status(id: str):
+    job = jobs.get(id)
+    if not job or job.get("job_type") != "inference":
+        return {"status": "unknown"}
     
-    result_path = RESULTS_DIR / project / run
+    response = {"job_id": id, **job}
+    output_path = job.get("output_path")
+    if output_path:
+        out_path = Path(output_path)
+        response["output_exists"] = out_path.exists()
+        response["output_name"] = out_path.name
+    return response
+
+@app.get("/results")
+def get_results(project: str | None = None, run: str | None = None, job_id: str | None = None):
+    job_info = None
+    result_path = None
+
+    if job_id:
+        job_info = jobs.get(job_id)
+        if not job_info or job_info.get("job_type") != "inference":
+            return {"status": "failed", "error": f"Inference job not found for id: {job_id}"}
+        if job_info.get("status") != "completed":
+            return {"status": job_info.get("status", "running"), "error": "Inference not completed yet"}
+        if job_info.get("output_path"):
+            result_path = Path(job_info["output_path"])
+        project = job_info.get("project", project)
+        run = job_info.get("save_name", run)
+
+    if not result_path:
+        if not project or not run:
+            return {"status": "failed", "error": "project and run are required when job_id is not provided"}
+        if not run.endswith(".tiff"):
+            run += ".tiff"
+        result_path = RESULTS_DIR / project / run
+    
     if result_path.exists():
         with open(result_path, "rb") as img_file:
             encoded = base64.b64encode(img_file.read()).decode("utf-8")
-        return JSONResponse(content={"image_base64": encoded, "status": "OK"})
+        return JSONResponse(content={
+            "image_base64": encoded,
+            "status": "OK",
+            "job_id": job_id,
+            "project": project,
+            "run": result_path.name,
+        })
     else:
-        return {"status": "failed", "error": f"Result not found: {project}/{run}"}
+        return {"status": "failed", "error": f"Result not found: {result_path}"}
 
 
 @app.get("/models/list")
